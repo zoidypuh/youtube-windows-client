@@ -212,6 +212,8 @@ let currentStatus: PlayerStatus = "loading";
 let mutationObserver: MutationObserver | null = null;
 let scheduledScan = false;
 let pendingResumePlayback: ResumePlaybackMessage | null = null;
+let autoplayWatchUrl = "";
+let autoplayWatchAttempts = 0;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -432,19 +434,43 @@ function buildState(status: PlayerStatus, error: string | null): PlayerState {
 }
 
 function ensureWatchPagePlayback(video: HTMLVideoElement) {
-  if (!isWatchPage() || !video.paused || video.ended || sanitizeNumber(video.currentTime) > 1.5) {
+  const currentUrl = normalizeResumeUrl(window.location.href);
+
+  if (currentUrl !== autoplayWatchUrl) {
+    autoplayWatchUrl = currentUrl;
+    autoplayWatchAttempts = 0;
+  }
+
+  if (
+    !isWatchPage() ||
+    !video.paused ||
+    video.ended ||
+    pendingResumePlayback !== null ||
+    sanitizeNumber(video.currentTime) > 2.5 ||
+    autoplayWatchAttempts >= 4
+  ) {
     return;
   }
 
+  autoplayWatchAttempts += 1;
+
   window.setTimeout(() => {
-    if (!isWatchPage() || !activeVideo || activeVideo !== video || !video.paused || video.ended) {
+    if (
+      normalizeResumeUrl(window.location.href) !== currentUrl ||
+      !isWatchPage() ||
+      !activeVideo ||
+      activeVideo !== video ||
+      !video.paused ||
+      video.ended ||
+      sanitizeNumber(video.currentTime) > 2.5
+    ) {
       return;
     }
 
     void video.play().catch(() => {
       document.querySelector<HTMLButtonElement>(".ytp-play-button")?.click();
     });
-  }, 120);
+  }, 120 * autoplayWatchAttempts);
 }
 
 function tryResumePlayback() {
@@ -530,6 +556,9 @@ function handleVideoEvent() {
   syncPlayerOnlyLayout();
   currentStatus = getVideoElement() ? "ready" : "idle";
   lastError = null;
+  if (activeVideo) {
+    ensureWatchPagePlayback(activeVideo);
+  }
   tryResumePlayback();
   emitState();
 }

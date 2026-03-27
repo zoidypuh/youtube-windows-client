@@ -168,6 +168,10 @@ input[type="range"] {
 
 .app--full .content {
   grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "video panel"
+    "footer panel";
   align-items: stretch;
 }
 
@@ -188,6 +192,7 @@ input[type="range"] {
 }
 
 .video-panel--surface {
+  grid-area: video;
   align-self: start;
   padding: 0;
   overflow: hidden;
@@ -254,6 +259,10 @@ input[type="range"] {
   overscroll-behavior: contain;
 }
 
+.app--full .control-panel {
+  grid-area: panel;
+}
+
 .app--mini .control-panel {
   min-height: auto;
   overflow: visible;
@@ -267,6 +276,10 @@ input[type="range"] {
 
 .queue-panel {
   min-height: 0;
+}
+
+.app--full .queue-panel {
+  flex: 1 1 auto;
 }
 
 .section-copy {
@@ -369,8 +382,13 @@ input[type="range"] {
 .panel-footer {
   display: grid;
   gap: 12px;
-  margin-top: auto;
   padding-top: 8px;
+}
+
+.panel-footer--video {
+  grid-area: footer;
+  align-self: end;
+  padding-top: 0;
 }
 
 .queue-item {
@@ -407,7 +425,8 @@ input[type="range"] {
 }
 
 .queue-item-title {
-  font-weight: 700;
+  font-size: 0.94rem;
+  font-weight: 600;
   line-height: 1.35;
 }
 
@@ -415,12 +434,6 @@ input[type="range"] {
   flex: 0 0 auto;
   color: #f1ba82;
   font-size: 0.83rem;
-}
-
-.queue-item-subtitle {
-  color: #b9c1c8;
-  font-size: 0.9rem;
-  line-height: 1.35;
 }
 
 .footer {

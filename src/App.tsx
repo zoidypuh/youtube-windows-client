@@ -281,6 +281,8 @@ export default function App() {
             </section>
           ) : null}
 
+          {shellState.mode === "full" ? <section className="panel-footer panel-footer--video">{footerContent}</section> : null}
+
           <section ref={controlPanelRef} className="control-panel" onWheelCapture={handleControlPanelWheel}>
             <section className="search-panel">
               <form className="search-form" onSubmit={submitSearch}>
@@ -380,9 +382,6 @@ export default function App() {
                           <span className="queue-item-duration">{item.durationLabel}</span>
                         ) : null}
                       </span>
-                      <span className="queue-item-subtitle">
-                        {item.subtitle || (item.isActive ? "Currently playing" : "Open this item")}
-                      </span>
                     </button>
                   ))}
                 </div>
@@ -392,8 +391,6 @@ export default function App() {
                 </p>
               )}
             </section>
-
-            {shellState.mode === "full" ? <section className="panel-footer">{footerContent}</section> : null}
           </section>
         </main>
 
