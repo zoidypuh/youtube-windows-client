@@ -1,0 +1,452 @@
+import { ipcRenderer } from "electron";
+
+type PlayerCommand = "play-pause" | "next" | "volume-up" | "volume-down" | "mute";
+type PlayerControlMessage =
+  | {
+      type: "command";
+      command: PlayerCommand;
+    }
+  | {
+      type: "set-volume";
+      value: number;
+    }
+  | {
+      type: "seek-to";
+      value: number;
+    };
+
+type PlayerStatus = "loading" | "ready" | "idle" | "error";
+
+type PlayerState = {
+  status: PlayerStatus;
+  title: string;
+  artist: string;
+  currentTime: number;
+  duration: number;
+  volume: number;
+  isMuted: boolean;
+  isPlaying: boolean;
+  canGoNext: boolean;
+  hasVideo: boolean;
+  url: string;
+  pageTitle: string;
+  artworkUrl: string | null;
+  error: string | null;
+};
+
+const DEFAULT_PLAYER_STATE: PlayerState = {
+  status: "loading",
+  title: "Opening YouTube",
+  artist: "Persistent profile session",
+  currentTime: 0,
+  duration: 0,
+  volume: 1,
+  isMuted: false,
+  isPlaying: false,
+  canGoNext: false,
+  hasVideo: false,
+  url: window.location.href,
+  pageTitle: document.title,
+  artworkUrl: null,
+  error: null
+};
+
+const VIDEO_EVENTS = [
+  "play",
+  "pause",
+  "timeupdate",
+  "durationchange",
+  "loadedmetadata",
+  "volumechange",
+  "ended",
+  "emptied",
+  "seeking",
+  "seeked"
+] as const;
+const PLAYER_ONLY_CLASS = "youtube-tray-player-only";
+const PLAYER_ONLY_STYLE_ID = "youtube-tray-player-only-style";
+const PLAYER_ONLY_STYLES = `
+  html.${PLAYER_ONLY_CLASS},
+  body.${PLAYER_ONLY_CLASS} {
+    background: #000 !important;
+    overflow: hidden !important;
+  }
+
+  html.${PLAYER_ONLY_CLASS} ytd-masthead,
+  html.${PLAYER_ONLY_CLASS} #secondary,
+  html.${PLAYER_ONLY_CLASS} #secondary-inner,
+  html.${PLAYER_ONLY_CLASS} #below,
+  html.${PLAYER_ONLY_CLASS} #related,
+  html.${PLAYER_ONLY_CLASS} #comments,
+  html.${PLAYER_ONLY_CLASS} ytd-comments,
+  html.${PLAYER_ONLY_CLASS} #chat,
+  html.${PLAYER_ONLY_CLASS} ytd-playlist-panel-renderer,
+  html.${PLAYER_ONLY_CLASS} tp-yt-app-drawer,
+  html.${PLAYER_ONLY_CLASS} #guide {
+    display: none !important;
+  }
+
+  html.${PLAYER_ONLY_CLASS} ytd-app,
+  html.${PLAYER_ONLY_CLASS} #content,
+  html.${PLAYER_ONLY_CLASS} #page-manager,
+  html.${PLAYER_ONLY_CLASS} ytd-watch-flexy,
+  html.${PLAYER_ONLY_CLASS} #columns,
+  html.${PLAYER_ONLY_CLASS} #primary,
+  html.${PLAYER_ONLY_CLASS} #primary-inner,
+  html.${PLAYER_ONLY_CLASS} #full-bleed-container,
+  html.${PLAYER_ONLY_CLASS} #player-full-bleed-container,
+  html.${PLAYER_ONLY_CLASS} #player-container,
+  html.${PLAYER_ONLY_CLASS} #ytd-player,
+  html.${PLAYER_ONLY_CLASS} #movie_player,
+  html.${PLAYER_ONLY_CLASS} .html5-video-player {
+    width: 100vw !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  html.${PLAYER_ONLY_CLASS} #page-manager,
+  html.${PLAYER_ONLY_CLASS} ytd-watch-flexy,
+  html.${PLAYER_ONLY_CLASS} #columns,
+  html.${PLAYER_ONLY_CLASS} #primary,
+  html.${PLAYER_ONLY_CLASS} #primary-inner,
+  html.${PLAYER_ONLY_CLASS} #full-bleed-container,
+  html.${PLAYER_ONLY_CLASS} #player-full-bleed-container,
+  html.${PLAYER_ONLY_CLASS} #player-container,
+  html.${PLAYER_ONLY_CLASS} #ytd-player,
+  html.${PLAYER_ONLY_CLASS} #movie_player,
+  html.${PLAYER_ONLY_CLASS} .html5-video-player,
+  html.${PLAYER_ONLY_CLASS} video {
+    height: 100vh !important;
+    min-height: 100vh !important;
+    max-height: none !important;
+  }
+
+  html.${PLAYER_ONLY_CLASS} #page-manager,
+  html.${PLAYER_ONLY_CLASS} ytd-watch-flexy,
+  html.${PLAYER_ONLY_CLASS} #columns,
+  html.${PLAYER_ONLY_CLASS} #primary,
+  html.${PLAYER_ONLY_CLASS} #primary-inner {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  html.${PLAYER_ONLY_CLASS} #movie_player {
+    border-radius: 0 !important;
+  }
+`;
+
+let activeVideo: HTMLVideoElement | null = null;
+let lastSentState = "";
+let lastError: string | null = null;
+let currentStatus: PlayerStatus = "loading";
+let mutationObserver: MutationObserver | null = null;
+let scheduledScan = false;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function sanitizeNumber(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, value);
+}
+
+function getVideoElement() {
+  return document.querySelector("video");
+}
+
+function getNextButton() {
+  return (
+    document.querySelector<HTMLButtonElement>(".ytp-next-button") ??
+    document.querySelector<HTMLButtonElement>('button[aria-label*="Next"]') ??
+    document.querySelector<HTMLButtonElement>('a[aria-label*="Next"]')
+  );
+}
+
+function isWatchPage() {
+  return window.location.pathname === "/watch";
+}
+
+function ensurePlayerOnlyStyles() {
+  if (document.getElementById(PLAYER_ONLY_STYLE_ID)) {
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.id = PLAYER_ONLY_STYLE_ID;
+  style.textContent = PLAYER_ONLY_STYLES;
+  document.documentElement.append(style);
+}
+
+function syncPlayerOnlyLayout() {
+  ensurePlayerOnlyStyles();
+
+  const shouldUsePlayerOnlyLayout = isWatchPage() && Boolean(getVideoElement());
+  document.documentElement.classList.toggle(PLAYER_ONLY_CLASS, shouldUsePlayerOnlyLayout);
+  document.body?.classList.toggle(PLAYER_ONLY_CLASS, shouldUsePlayerOnlyLayout);
+}
+
+function getMediaSessionMetadata() {
+  const metadata = navigator.mediaSession?.metadata;
+
+  return {
+    title: metadata?.title?.trim() ?? "",
+    artist: metadata?.artist?.trim() ?? "",
+    artworkUrl: metadata?.artwork?.[0]?.src ?? null
+  };
+}
+
+function getDocumentTitle() {
+  return document.title.replace(/\s*-\s*YouTube$/, "").trim();
+}
+
+function getTrackTitle() {
+  const mediaMetadata = getMediaSessionMetadata();
+
+  if (mediaMetadata.title) {
+    return mediaMetadata.title;
+  }
+
+  const heading =
+    document.querySelector<HTMLElement>("h1.ytd-watch-metadata yt-formatted-string") ??
+    document.querySelector<HTMLElement>("h1.title");
+
+  return heading?.textContent?.trim() || getDocumentTitle() || DEFAULT_PLAYER_STATE.title;
+}
+
+function getTrackArtist() {
+  const mediaMetadata = getMediaSessionMetadata();
+
+  if (mediaMetadata.artist) {
+    return mediaMetadata.artist;
+  }
+
+  const channel =
+    document.querySelector<HTMLElement>("#owner #channel-name a") ??
+    document.querySelector<HTMLElement>("ytd-channel-name a");
+
+  return channel?.textContent?.trim() || DEFAULT_PLAYER_STATE.artist;
+}
+
+function buildState(status: PlayerStatus, error: string | null): PlayerState {
+  const video = getVideoElement();
+  const metadata = getMediaSessionMetadata();
+  const nextButton = getNextButton();
+
+  return {
+    status,
+    title: getTrackTitle(),
+    artist: getTrackArtist(),
+    currentTime: Math.floor(sanitizeNumber(video?.currentTime ?? 0)),
+    duration: Math.floor(sanitizeNumber(video?.duration ?? 0)),
+    volume: clamp(video?.volume ?? DEFAULT_PLAYER_STATE.volume, 0, 1),
+    isMuted: video?.muted ?? false,
+    isPlaying: Boolean(video && !video.paused && !video.ended),
+    canGoNext: Boolean(nextButton && !nextButton.hasAttribute("disabled")),
+    hasVideo: Boolean(video),
+    url: window.location.href,
+    pageTitle: document.title,
+    artworkUrl: metadata.artworkUrl,
+    error
+  };
+}
+
+function emitState(status = currentStatus, error = lastError) {
+  syncPlayerOnlyLayout();
+
+  const state = buildState(status, error);
+  const serialized = JSON.stringify(state);
+
+  if (serialized === lastSentState) {
+    return;
+  }
+
+  lastSentState = serialized;
+  ipcRenderer.send("youtube:state", state);
+}
+
+function updateStatus(status: PlayerStatus, error: string | null = null) {
+  currentStatus = status;
+  lastError = error;
+  emitState(status, error);
+}
+
+function handleVideoEvent() {
+  syncPlayerOnlyLayout();
+  currentStatus = getVideoElement() ? "ready" : "idle";
+  lastError = null;
+  emitState();
+}
+
+function detachVideoEvents() {
+  if (!activeVideo) {
+    return;
+  }
+
+  for (const eventName of VIDEO_EVENTS) {
+    activeVideo.removeEventListener(eventName, handleVideoEvent);
+  }
+
+  activeVideo = null;
+}
+
+function attachVideoEvents() {
+  const nextVideo = getVideoElement();
+
+  if (nextVideo === activeVideo) {
+    return;
+  }
+
+  detachVideoEvents();
+
+  if (!nextVideo) {
+    updateStatus(document.readyState === "complete" ? "idle" : "loading");
+    return;
+  }
+
+  activeVideo = nextVideo;
+
+  for (const eventName of VIDEO_EVENTS) {
+    activeVideo.addEventListener(eventName, handleVideoEvent);
+  }
+
+  updateStatus("ready");
+}
+
+function scheduleAttachVideoEvents() {
+  if (scheduledScan) {
+    return;
+  }
+
+  scheduledScan = true;
+  window.setTimeout(() => {
+    scheduledScan = false;
+    attachVideoEvents();
+    syncPlayerOnlyLayout();
+    emitState();
+  }, 50);
+}
+
+function clickNextButton() {
+  const nextButton = getNextButton();
+
+  if (!nextButton || nextButton.hasAttribute("disabled")) {
+    return;
+  }
+
+  nextButton.click();
+}
+
+function togglePlayPause() {
+  const video = getVideoElement();
+
+  if (!video) {
+    return;
+  }
+
+  if (video.paused || video.ended) {
+    void video.play().catch(() => {
+      document.querySelector<HTMLButtonElement>(".ytp-play-button")?.click();
+    });
+    return;
+  }
+
+  video.pause();
+}
+
+function setVolume(value: number) {
+  const video = getVideoElement();
+
+  if (!video) {
+    return;
+  }
+
+  video.muted = false;
+  video.volume = clamp(value, 0, 1);
+}
+
+function seekTo(value: number) {
+  const video = getVideoElement();
+
+  if (!video) {
+    return;
+  }
+
+  video.currentTime = clamp(value, 0, sanitizeNumber(video.duration));
+}
+
+function handleControlMessage(message: PlayerControlMessage) {
+  switch (message.type) {
+    case "command": {
+      const video = getVideoElement();
+
+      switch (message.command) {
+        case "play-pause":
+          togglePlayPause();
+          break;
+        case "next":
+          clickNextButton();
+          break;
+        case "volume-up":
+          setVolume((video?.volume ?? 0.5) + 0.08);
+          break;
+        case "volume-down":
+          setVolume((video?.volume ?? 0.5) - 0.08);
+          break;
+        case "mute":
+          if (video) {
+            video.muted = !video.muted;
+          }
+          break;
+      }
+      break;
+    }
+    case "set-volume":
+      setVolume(message.value);
+      break;
+    case "seek-to":
+      seekTo(message.value);
+      break;
+  }
+
+  window.setTimeout(() => emitState(), 25);
+}
+
+ipcRenderer.on("youtube:player-control", (_event, message: PlayerControlMessage) => {
+  handleControlMessage(message);
+});
+
+ipcRenderer.on("youtube:request-state", () => {
+  emitState();
+});
+
+window.addEventListener("DOMContentLoaded", () => {
+  updateStatus("loading");
+  syncPlayerOnlyLayout();
+  attachVideoEvents();
+
+  mutationObserver = new MutationObserver(() => {
+    scheduleAttachVideoEvents();
+  });
+
+  mutationObserver.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true
+  });
+
+  window.setInterval(() => {
+    attachVideoEvents();
+    emitState();
+  }, 1000);
+});
+
+window.addEventListener("load", () => {
+  attachVideoEvents();
+  syncPlayerOnlyLayout();
+  emitState();
+});
