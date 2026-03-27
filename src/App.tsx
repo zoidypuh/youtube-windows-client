@@ -6,8 +6,9 @@ import {
   useRef,
   useState
 } from "react";
+import type { FormEvent, WheelEvent } from "react";
 import { DEFAULT_PLAYER_STATE, DEFAULT_SHELL_STATE, shellApi } from "./shell";
-import type { PlayerState, ShellState, VideoBounds } from "./types";
+import type { PlayerState, ShellState, UpcomingItem, VideoBounds } from "./types";
 
 function formatSeconds(seconds: number) {
   const minutes = Math.floor(seconds / 60);
@@ -18,6 +19,10 @@ function formatSeconds(seconds: number) {
 export default function App() {
   const [shellState, setShellState] = useState<ShellState>(DEFAULT_SHELL_STATE);
   const [playerState, setPlayerState] = useState<PlayerState>(DEFAULT_PLAYER_STATE);
+  const [searchQuery, setSearchQuery] = useState("");
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const controlPanelRef = useRef<HTMLElement | null>(null);
+  const videoStageRef = useRef<HTMLDivElement | null>(null);
   const videoSurfaceRef = useRef<HTMLDivElement | null>(null);
   const deferredPlayerState = useDeferredValue(playerState);
 
@@ -56,19 +61,44 @@ export default function App() {
   }, []);
 
   const syncVideoBounds = useEffectEvent(() => {
-    if (shellState.mode !== "full" || shellState.isVideoFullscreen || !videoSurfaceRef.current) {
+    if (shellState.mode !== "full" || !videoStageRef.current) {
       void shellApi.setVideoBounds(null);
       return;
     }
 
-    const rect = videoSurfaceRef.current.getBoundingClientRect();
+    if (shellState.isVideoFullscreen) {
+      return;
+    }
+
+    const rect = videoStageRef.current.getBoundingClientRect();
+    const hasVideoAspectRatio = playerState.videoWidth > 0 && playerState.videoHeight > 0;
+    const videoAspectRatio = hasVideoAspectRatio ? playerState.videoWidth / playerState.videoHeight : 0;
+    const stageAspectRatio = rect.height > 0 ? rect.width / rect.height : 0;
+
+    let nextX = rect.left;
+    let nextY = rect.top;
+    let nextWidth = rect.width;
+    let nextHeight = rect.height;
+
+    if (videoAspectRatio > 0 && stageAspectRatio > 0) {
+      if (stageAspectRatio > videoAspectRatio) {
+        nextHeight = rect.height;
+        nextWidth = nextHeight * videoAspectRatio;
+        nextX = rect.left + (rect.width - nextWidth) / 2;
+      } else {
+        nextWidth = rect.width;
+        nextHeight = nextWidth / videoAspectRatio;
+        nextY = rect.top + (rect.height - nextHeight) / 2;
+      }
+    }
+
     const bounds: VideoBounds | null =
-      rect.width > 0 && rect.height > 0
+      nextWidth > 0 && nextHeight > 0
         ? {
-            x: Math.round(rect.left),
-            y: Math.round(rect.top),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height)
+            x: Math.round(nextX),
+            y: Math.round(nextY),
+            width: Math.round(nextWidth),
+            height: Math.round(nextHeight)
           }
         : null;
 
@@ -84,25 +114,34 @@ export default function App() {
 
     scheduleBoundsSync();
 
-    if (shellState.mode !== "full" || !videoSurfaceRef.current) {
-      return () => {
-        void shellApi.setVideoBounds(null);
-      };
+    if (shellState.mode !== "full" || !videoStageRef.current) {
+      return;
     }
 
     const resizeObserver = new ResizeObserver(() => {
       scheduleBoundsSync();
     });
 
-    resizeObserver.observe(videoSurfaceRef.current);
+    resizeObserver.observe(videoStageRef.current);
     window.addEventListener("resize", scheduleBoundsSync);
 
     return () => {
       resizeObserver.disconnect();
       window.removeEventListener("resize", scheduleBoundsSync);
-      void shellApi.setVideoBounds(null);
     };
-  }, [shellState.isVideoFullscreen, shellState.mode, syncVideoBounds]);
+  }, [
+    playerState.videoHeight,
+    playerState.videoWidth,
+    shellState.isVideoFullscreen,
+    shellState.mode,
+    syncVideoBounds
+  ]);
+
+  useEffect(() => {
+    if (shellState.mode !== "full") {
+      void shellApi.setVideoBounds(null);
+    }
+  }, [shellState.mode]);
 
   const displayVolume = deferredPlayerState.isMuted ? 0 : deferredPlayerState.volume;
   const progressValue = Math.min(
@@ -110,28 +149,93 @@ export default function App() {
     Math.max(deferredPlayerState.duration, deferredPlayerState.currentTime)
   );
 
-  let statusCopy = "Loading the persistent YouTube session.";
-  if (deferredPlayerState.status === "ready") {
-    statusCopy = deferredPlayerState.hasVideo
-      ? "Connected to the live YouTube player."
-      : "YouTube is open, but there is no active video element yet.";
-  } else if (deferredPlayerState.status === "idle") {
-    statusCopy = "YouTube is loaded. Pick a recommendation or open a watch page in full mode.";
-  } else if (deferredPlayerState.status === "error") {
-    statusCopy = deferredPlayerState.error ?? "The embedded YouTube view hit a load error.";
-  }
-
   const title =
     deferredPlayerState.title.trim() || DEFAULT_PLAYER_STATE.title;
   const artist =
     deferredPlayerState.artist.trim() || DEFAULT_PLAYER_STATE.artist;
+  const upcomingItems = deferredPlayerState.upcomingItems.slice(0, 8);
+  const isSizeLocked = shellState.sizeLockByMode[shellState.mode];
+  const videoAspectRatio =
+    deferredPlayerState.videoWidth > 0 && deferredPlayerState.videoHeight > 0
+      ? `${deferredPlayerState.videoWidth} / ${deferredPlayerState.videoHeight}`
+      : "16 / 9";
+  const footerContent = (
+    <>
+      <div className="status-line">
+        <span
+          className={`status-dot ${deferredPlayerState.isPlaying ? "status-dot--live" : ""}`}
+        />
+        <span>
+          {deferredPlayerState.isPlaying
+            ? "Playback active"
+            : deferredPlayerState.status === "loading"
+              ? "Player loading"
+              : "Playback paused"}
+        </span>
+      </div>
+      <div className="shortcut-list">
+        <span>{shellState.shortcuts.playPause} play/pause</span>
+        <span>{shellState.shortcuts.next} next</span>
+        <span>{shellState.shortcuts.volumeUp} volume up</span>
+        <span>{shellState.shortcuts.volumeDown} volume down</span>
+        <span>{shellState.shortcuts.mute} mute</span>
+        <span>{shellState.shortcuts.toggleMode} mode</span>
+        <span>{shellState.shortcuts.toggleWindow} show/hide</span>
+      </div>
+    </>
+  );
+
+  const submitSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmedQuery = searchQuery.trim();
+
+    if (!trimmedQuery) {
+      return;
+    }
+
+    void shellApi.searchYoutube(trimmedQuery);
+  };
+
+  const openUpcomingItem = (item: UpcomingItem) => {
+    void shellApi.openYoutubeUrl(item.url);
+  };
+
+  const handleShellWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (shellState.mode !== "mini" || !shellRef.current) {
+      return;
+    }
+
+    const scrollContainer = shellRef.current;
+
+    if (scrollContainer.scrollHeight <= scrollContainer.clientHeight) {
+      return;
+    }
+
+    event.preventDefault();
+    scrollContainer.scrollTop += event.deltaY;
+  };
+
+  const handleControlPanelWheel = (event: WheelEvent<HTMLElement>) => {
+    if (shellState.mode !== "full" || !controlPanelRef.current) {
+      return;
+    }
+
+    const scrollContainer = controlPanelRef.current;
+
+    if (scrollContainer.scrollHeight <= scrollContainer.clientHeight) {
+      return;
+    }
+
+    event.preventDefault();
+    scrollContainer.scrollTop += event.deltaY;
+  };
 
   return (
     <div
       className={`app app--${shellState.mode}${shellState.isVideoFullscreen ? " app--video-fullscreen" : ""}`}
     >
       <div className="backdrop" />
-      <div className="shell">
+      <div ref={shellRef} className="shell" onWheelCapture={handleShellWheel}>
         <header className="topbar">
           <div>
             <p className="eyebrow">Persistent YouTube Session</p>
@@ -139,36 +243,69 @@ export default function App() {
           </div>
 
           <div className="window-actions">
+            {shellState.mode === "full" ? (
+              <button
+                className={`ghost-button${isSizeLocked ? " ghost-button--active" : ""}`}
+                onClick={() => void shellApi.toggleSizeLock()}
+              >
+                Lock Size {isSizeLocked ? "On" : "Off"}
+              </button>
+            ) : null}
             <button className="ghost-button" onClick={() => void shellApi.toggleMode()}>
               {shellState.mode === "mini" ? "Open Full" : "Back to Mini"}
             </button>
             <button className="ghost-button" onClick={() => void shellApi.hideWindow()}>
               Hide to Tray
             </button>
+            {shellState.mode === "mini" ? (
+              <button
+                className={`ghost-button${isSizeLocked ? " ghost-button--active" : ""}`}
+                onClick={() => void shellApi.toggleSizeLock()}
+              >
+                Lock Size {isSizeLocked ? "On" : "Off"}
+              </button>
+            ) : null}
           </div>
         </header>
 
         <main className="content">
           {shellState.mode === "full" ? (
             <section className="video-panel video-panel--surface">
-              <div className="video-stage">
+              <div
+                ref={videoStageRef}
+                className="video-stage"
+                style={{ aspectRatio: videoAspectRatio }}
+              >
                 <div ref={videoSurfaceRef} className="video-surface-anchor" />
               </div>
             </section>
           ) : null}
 
-          <section className="control-panel">
+          <section ref={controlPanelRef} className="control-panel" onWheelCapture={handleControlPanelWheel}>
+            <section className="search-panel">
+              <form className="search-form" onSubmit={submitSearch}>
+                <input
+                  className="search-input"
+                  type="search"
+                  value={searchQuery}
+                  placeholder="Search YouTube videos or playlists"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                />
+                <div className="search-actions">
+                  <button className="ghost-button" type="button" onClick={() => void shellApi.openYoutubeHome()}>
+                    Browse
+                  </button>
+                  <button className="icon-button" type="submit">
+                    Search
+                  </button>
+                </div>
+              </form>
+            </section>
+
             <div className="track-meta">
               <p className="label">Now playing</p>
               <h2>{title}</h2>
               <p className="supporting">{artist}</p>
-              <p className="note">{statusCopy}</p>
-              {shellState.mode === "full" ? (
-                <p className="note">
-                  Watch pages now collapse down to the player, and the YouTube fullscreen button
-                  should take over the whole app window.
-                </p>
-              ) : null}
               <p className="meta-line">{deferredPlayerState.url}</p>
             </div>
 
@@ -219,32 +356,48 @@ export default function App() {
                 onChange={(event) => void shellApi.setPlayerVolume(Number(event.target.value) / 100)}
               />
             </div>
+
+            <section className="queue-panel">
+              <div className="section-copy">
+                <p className="label">Up Next</p>
+                <p className="section-note">
+                  Playlist entries and YouTube recommendations show up here when the page exposes them.
+                </p>
+              </div>
+
+              {upcomingItems.length > 0 ? (
+                <div className="queue-list">
+                  {upcomingItems.map((item) => (
+                    <button
+                      key={item.id}
+                      className={`queue-item${item.isActive ? " queue-item--active" : ""}`}
+                      type="button"
+                      onClick={() => openUpcomingItem(item)}
+                    >
+                      <span className="queue-item-row">
+                        <span className="queue-item-title">{item.title}</span>
+                        {item.durationLabel ? (
+                          <span className="queue-item-duration">{item.durationLabel}</span>
+                        ) : null}
+                      </span>
+                      <span className="queue-item-subtitle">
+                        {item.subtitle || (item.isActive ? "Currently playing" : "Open this item")}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="section-note">
+                  No queue is exposed on this page yet. Search or open a playlist to populate this list.
+                </p>
+              )}
+            </section>
+
+            {shellState.mode === "full" ? <section className="panel-footer">{footerContent}</section> : null}
           </section>
         </main>
 
-        <footer className="footer">
-          <div className="status-line">
-            <span
-              className={`status-dot ${deferredPlayerState.isPlaying ? "status-dot--live" : ""}`}
-            />
-            <span>
-              {deferredPlayerState.isPlaying
-                ? "Playback active"
-                : deferredPlayerState.status === "loading"
-                  ? "Player loading"
-                  : "Playback paused"}
-            </span>
-          </div>
-          <div className="shortcut-list">
-            <span>{shellState.shortcuts.playPause} play/pause</span>
-            <span>{shellState.shortcuts.next} next</span>
-            <span>{shellState.shortcuts.volumeUp} volume up</span>
-            <span>{shellState.shortcuts.volumeDown} volume down</span>
-            <span>{shellState.shortcuts.mute} mute</span>
-            <span>{shellState.shortcuts.toggleMode} mode</span>
-            <span>{shellState.shortcuts.toggleWindow} show/hide</span>
-          </div>
-        </footer>
+        {shellState.mode === "mini" ? <footer className="footer">{footerContent}</footer> : null}
       </div>
     </div>
   );

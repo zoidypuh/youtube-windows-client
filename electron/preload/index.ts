@@ -11,12 +11,24 @@ type VideoBounds = {
   height: number;
 };
 
+type UpcomingItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  url: string;
+  durationLabel: string;
+  thumbnailUrl: string | null;
+  isActive: boolean;
+};
+
 type PlayerState = {
   status: PlayerStatus;
   title: string;
   artist: string;
   currentTime: number;
   duration: number;
+  videoWidth: number;
+  videoHeight: number;
   volume: number;
   isMuted: boolean;
   isPlaying: boolean;
@@ -25,12 +37,14 @@ type PlayerState = {
   url: string;
   pageTitle: string;
   artworkUrl: string | null;
+  upcomingItems: UpcomingItem[];
   error: string | null;
 };
 
 type ShellState = {
   mode: WindowMode;
   isVideoFullscreen: boolean;
+  sizeLockByMode: Record<WindowMode, boolean>;
   shortcuts: {
     playPause: string;
     next: string;
@@ -46,6 +60,7 @@ contextBridge.exposeInMainWorld("youtubeTray", {
   getShellState: () => ipcRenderer.invoke("shell:get-state") as Promise<ShellState>,
   getPlayerState: () => ipcRenderer.invoke("player:get-state") as Promise<PlayerState>,
   toggleMode: () => ipcRenderer.invoke("shell:toggle-mode") as Promise<ShellState>,
+  toggleSizeLock: () => ipcRenderer.invoke("shell:toggle-size-lock") as Promise<ShellState>,
   toggleVisibility: () => ipcRenderer.invoke("shell:toggle-visibility") as Promise<void>,
   hideWindow: () => ipcRenderer.invoke("shell:hide-window") as Promise<void>,
   quit: () => ipcRenderer.invoke("shell:quit") as Promise<void>,
@@ -54,6 +69,9 @@ contextBridge.exposeInMainWorld("youtubeTray", {
   setPlayerVolume: (value: number) =>
     ipcRenderer.invoke("player:set-volume", value) as Promise<void>,
   seekPlayer: (value: number) => ipcRenderer.invoke("player:seek-to", value) as Promise<void>,
+  searchYoutube: (query: string) => ipcRenderer.invoke("youtube:search", query) as Promise<void>,
+  openYoutubeUrl: (url: string) => ipcRenderer.invoke("youtube:open-url", url) as Promise<void>,
+  openYoutubeHome: () => ipcRenderer.invoke("youtube:open-home") as Promise<void>,
   setVideoBounds: (bounds: VideoBounds | null) =>
     ipcRenderer.invoke("shell:set-video-bounds", bounds) as Promise<void>,
   onShellStateChange: (callback: (state: ShellState) => void) => {

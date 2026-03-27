@@ -17,12 +17,30 @@ type PlayerControlMessage =
 
 type PlayerStatus = "loading" | "ready" | "idle" | "error";
 
+type UpcomingItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  url: string;
+  durationLabel: string;
+  thumbnailUrl: string | null;
+  isActive: boolean;
+};
+
+type ResumePlaybackMessage = {
+  url: string;
+  currentTime: number;
+  shouldResumePlaying: boolean;
+};
+
 type PlayerState = {
   status: PlayerStatus;
   title: string;
   artist: string;
   currentTime: number;
   duration: number;
+  videoWidth: number;
+  videoHeight: number;
   volume: number;
   isMuted: boolean;
   isPlaying: boolean;
@@ -31,6 +49,7 @@ type PlayerState = {
   url: string;
   pageTitle: string;
   artworkUrl: string | null;
+  upcomingItems: UpcomingItem[];
   error: string | null;
 };
 
@@ -40,6 +59,8 @@ const DEFAULT_PLAYER_STATE: PlayerState = {
   artist: "Persistent profile session",
   currentTime: 0,
   duration: 0,
+  videoWidth: 0,
+  videoHeight: 0,
   volume: 1,
   isMuted: false,
   isPlaying: false,
@@ -48,6 +69,7 @@ const DEFAULT_PLAYER_STATE: PlayerState = {
   url: window.location.href,
   pageTitle: document.title,
   artworkUrl: null,
+  upcomingItems: [],
   error: null
 };
 
@@ -57,6 +79,7 @@ const VIDEO_EVENTS = [
   "timeupdate",
   "durationchange",
   "loadedmetadata",
+  "canplay",
   "volumechange",
   "ended",
   "emptied",
@@ -90,16 +113,20 @@ const PLAYER_ONLY_STYLES = `
   html.${PLAYER_ONLY_CLASS} #content,
   html.${PLAYER_ONLY_CLASS} #page-manager,
   html.${PLAYER_ONLY_CLASS} ytd-watch-flexy,
+  html.${PLAYER_ONLY_CLASS} #player,
   html.${PLAYER_ONLY_CLASS} #columns,
   html.${PLAYER_ONLY_CLASS} #primary,
   html.${PLAYER_ONLY_CLASS} #primary-inner,
   html.${PLAYER_ONLY_CLASS} #full-bleed-container,
   html.${PLAYER_ONLY_CLASS} #player-full-bleed-container,
+  html.${PLAYER_ONLY_CLASS} #player-container-outer,
+  html.${PLAYER_ONLY_CLASS} #player-container-inner,
   html.${PLAYER_ONLY_CLASS} #player-container,
   html.${PLAYER_ONLY_CLASS} #ytd-player,
   html.${PLAYER_ONLY_CLASS} #movie_player,
   html.${PLAYER_ONLY_CLASS} .html5-video-player {
-    width: 100vw !important;
+    width: 100% !important;
+    min-width: 0 !important;
     max-width: none !important;
     margin: 0 !important;
     padding: 0 !important;
@@ -107,23 +134,62 @@ const PLAYER_ONLY_STYLES = `
 
   html.${PLAYER_ONLY_CLASS} #page-manager,
   html.${PLAYER_ONLY_CLASS} ytd-watch-flexy,
+  html.${PLAYER_ONLY_CLASS} #player,
   html.${PLAYER_ONLY_CLASS} #columns,
   html.${PLAYER_ONLY_CLASS} #primary,
   html.${PLAYER_ONLY_CLASS} #primary-inner,
   html.${PLAYER_ONLY_CLASS} #full-bleed-container,
   html.${PLAYER_ONLY_CLASS} #player-full-bleed-container,
+  html.${PLAYER_ONLY_CLASS} #player-container-outer,
+  html.${PLAYER_ONLY_CLASS} #player-container-inner,
   html.${PLAYER_ONLY_CLASS} #player-container,
   html.${PLAYER_ONLY_CLASS} #ytd-player,
   html.${PLAYER_ONLY_CLASS} #movie_player,
   html.${PLAYER_ONLY_CLASS} .html5-video-player,
-  html.${PLAYER_ONLY_CLASS} video {
-    height: 100vh !important;
-    min-height: 100vh !important;
+  html.${PLAYER_ONLY_CLASS} .html5-video-container {
+    height: 100% !important;
+    min-height: 0 !important;
     max-height: none !important;
+  }
+
+  html.${PLAYER_ONLY_CLASS} body,
+  html.${PLAYER_ONLY_CLASS} ytd-app,
+  html.${PLAYER_ONLY_CLASS} #content,
+  html.${PLAYER_ONLY_CLASS} #page-manager,
+  html.${PLAYER_ONLY_CLASS} ytd-watch-flexy,
+  html.${PLAYER_ONLY_CLASS} #player,
+  html.${PLAYER_ONLY_CLASS} #columns,
+  html.${PLAYER_ONLY_CLASS} #primary,
+  html.${PLAYER_ONLY_CLASS} #primary-inner,
+  html.${PLAYER_ONLY_CLASS} #full-bleed-container,
+  html.${PLAYER_ONLY_CLASS} #player-full-bleed-container,
+  html.${PLAYER_ONLY_CLASS} #player-container-outer,
+  html.${PLAYER_ONLY_CLASS} #player-container-inner,
+  html.${PLAYER_ONLY_CLASS} #player-container,
+  html.${PLAYER_ONLY_CLASS} #ytd-player {
+    width: 100% !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    min-width: 0 !important;
+    max-height: none !important;
+  }
+
+  html.${PLAYER_ONLY_CLASS} #player,
+  html.${PLAYER_ONLY_CLASS} #player-full-bleed-container,
+  html.${PLAYER_ONLY_CLASS} #player-container-outer,
+  html.${PLAYER_ONLY_CLASS} #player-container-inner,
+  html.${PLAYER_ONLY_CLASS} #player-container,
+  html.${PLAYER_ONLY_CLASS} #ytd-player {
+    position: fixed !important;
+    inset: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    transform: none !important;
   }
 
   html.${PLAYER_ONLY_CLASS} #page-manager,
   html.${PLAYER_ONLY_CLASS} ytd-watch-flexy,
+  html.${PLAYER_ONLY_CLASS} #player,
   html.${PLAYER_ONLY_CLASS} #columns,
   html.${PLAYER_ONLY_CLASS} #primary,
   html.${PLAYER_ONLY_CLASS} #primary-inner {
@@ -131,8 +197,11 @@ const PLAYER_ONLY_STYLES = `
     padding: 0 !important;
   }
 
-  html.${PLAYER_ONLY_CLASS} #movie_player {
+  html.${PLAYER_ONLY_CLASS} #movie_player,
+  html.${PLAYER_ONLY_CLASS} .html5-video-player,
+  html.${PLAYER_ONLY_CLASS} .html5-video-container {
     border-radius: 0 !important;
+    background: #000 !important;
   }
 `;
 
@@ -142,6 +211,7 @@ let lastError: string | null = null;
 let currentStatus: PlayerStatus = "loading";
 let mutationObserver: MutationObserver | null = null;
 let scheduledScan = false;
+let pendingResumePlayback: ResumePlaybackMessage | null = null;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -155,6 +225,19 @@ function sanitizeNumber(value: number) {
   return Math.max(0, value);
 }
 
+function normalizeResumeUrl(rawUrl: string) {
+  try {
+    const parsedUrl = new URL(rawUrl, window.location.origin);
+    parsedUrl.hash = "";
+    parsedUrl.searchParams.delete("t");
+    parsedUrl.searchParams.delete("start");
+    parsedUrl.searchParams.delete("time_continue");
+    return parsedUrl.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 function getVideoElement() {
   return document.querySelector("video");
 }
@@ -165,6 +248,96 @@ function getNextButton() {
     document.querySelector<HTMLButtonElement>('button[aria-label*="Next"]') ??
     document.querySelector<HTMLButtonElement>('a[aria-label*="Next"]')
   );
+}
+
+function getTextContent(element: Element | null | undefined) {
+  return element?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+}
+
+function getItemUrl(item: HTMLElement) {
+  return (
+    item.querySelector<HTMLAnchorElement>("a#wc-endpoint")?.href ??
+    item.querySelector<HTMLAnchorElement>("a#thumbnail")?.href ??
+    item.querySelector<HTMLAnchorElement>("a#video-title")?.href ??
+    ""
+  );
+}
+
+function isActiveUpcomingItem(item: HTMLElement, href: string) {
+  return (
+    item.hasAttribute("selected") ||
+    item.getAttribute("selected") === "" ||
+    item.querySelector('[aria-current="true"]') !== null ||
+    normalizeResumeUrl(href) === normalizeResumeUrl(window.location.href)
+  );
+}
+
+function getUpcomingItems() {
+  const playlistItems = Array.from(document.querySelectorAll<HTMLElement>("ytd-playlist-panel-video-renderer"));
+  const recommendationItems = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      "ytd-watch-next-secondary-results-renderer ytd-compact-video-renderer, ytd-item-section-renderer ytd-compact-video-renderer"
+    )
+  );
+  const activePlaylistIndex = playlistItems.findIndex((item) => {
+    const href = getItemUrl(item);
+    return href ? isActiveUpcomingItem(item, href) : false;
+  });
+  const futurePlaylistItems =
+    activePlaylistIndex >= 0 ? playlistItems.slice(activePlaylistIndex + 1) : playlistItems;
+  const sourceItems = (futurePlaylistItems.length > 0 ? futurePlaylistItems : recommendationItems).slice(0, 12);
+  const seenUrls = new Set<string>();
+  const upcomingItems: UpcomingItem[] = [];
+  const currentUrl = normalizeResumeUrl(window.location.href);
+
+  for (const item of sourceItems) {
+    const href = getItemUrl(item);
+    const title = getTextContent(
+      item.querySelector("#video-title") ??
+        item.querySelector("yt-formatted-string#video-title") ??
+        item.querySelector("h3 a")
+    );
+
+    if (!href || !title) {
+      continue;
+    }
+
+    const normalizedHref = normalizeResumeUrl(href);
+
+    if (!normalizedHref || normalizedHref === currentUrl || seenUrls.has(normalizedHref)) {
+      continue;
+    }
+
+    seenUrls.add(normalizedHref);
+
+    const subtitle = getTextContent(
+      item.querySelector("#byline") ??
+        item.querySelector("#channel-name") ??
+        item.querySelector(".short-byline-text") ??
+        item.querySelector("ytd-channel-name")
+    );
+    const durationLabel = getTextContent(
+      item.querySelector("ytd-thumbnail-overlay-time-status-renderer #text") ??
+        item.querySelector("badge-shape .badge-shape-wiz__text") ??
+        item.querySelector(".ytd-thumbnail-overlay-time-status-renderer")
+    );
+    const thumbnailUrl =
+      item.querySelector<HTMLImageElement>("img")?.src ||
+      item.querySelector<HTMLImageElement>("img")?.getAttribute("src") ||
+      null;
+
+    upcomingItems.push({
+      id: normalizedHref,
+      title,
+      subtitle,
+      url: href,
+      durationLabel,
+      thumbnailUrl,
+      isActive: isActiveUpcomingItem(item, href)
+    });
+  }
+
+  return upcomingItems;
 }
 
 function isWatchPage() {
@@ -185,7 +358,7 @@ function ensurePlayerOnlyStyles() {
 function syncPlayerOnlyLayout() {
   ensurePlayerOnlyStyles();
 
-  const shouldUsePlayerOnlyLayout = isWatchPage() && Boolean(getVideoElement());
+  const shouldUsePlayerOnlyLayout = isWatchPage();
   document.documentElement.classList.toggle(PLAYER_ONLY_CLASS, shouldUsePlayerOnlyLayout);
   document.body?.classList.toggle(PLAYER_ONLY_CLASS, shouldUsePlayerOnlyLayout);
 }
@@ -243,6 +416,8 @@ function buildState(status: PlayerStatus, error: string | null): PlayerState {
     artist: getTrackArtist(),
     currentTime: Math.floor(sanitizeNumber(video?.currentTime ?? 0)),
     duration: Math.floor(sanitizeNumber(video?.duration ?? 0)),
+    videoWidth: Math.floor(sanitizeNumber(video?.videoWidth ?? 0)),
+    videoHeight: Math.floor(sanitizeNumber(video?.videoHeight ?? 0)),
     volume: clamp(video?.volume ?? DEFAULT_PLAYER_STATE.volume, 0, 1),
     isMuted: video?.muted ?? false,
     isPlaying: Boolean(video && !video.paused && !video.ended),
@@ -251,12 +426,88 @@ function buildState(status: PlayerStatus, error: string | null): PlayerState {
     url: window.location.href,
     pageTitle: document.title,
     artworkUrl: metadata.artworkUrl,
+    upcomingItems: getUpcomingItems(),
     error
   };
 }
 
+function ensureWatchPagePlayback(video: HTMLVideoElement) {
+  if (!isWatchPage() || !video.paused || video.ended || sanitizeNumber(video.currentTime) > 1.5) {
+    return;
+  }
+
+  window.setTimeout(() => {
+    if (!isWatchPage() || !activeVideo || activeVideo !== video || !video.paused || video.ended) {
+      return;
+    }
+
+    void video.play().catch(() => {
+      document.querySelector<HTMLButtonElement>(".ytp-play-button")?.click();
+    });
+  }, 120);
+}
+
+function tryResumePlayback() {
+  if (!pendingResumePlayback) {
+    return;
+  }
+
+  if (normalizeResumeUrl(window.location.href) !== normalizeResumeUrl(pendingResumePlayback.url)) {
+    return;
+  }
+
+  const video = getVideoElement();
+
+  if (!video) {
+    return;
+  }
+
+  const targetTime = clamp(
+    pendingResumePlayback.currentTime,
+    0,
+    sanitizeNumber(video.duration || pendingResumePlayback.currentTime)
+  );
+
+  if (Math.abs(video.currentTime - targetTime) > 1) {
+    video.currentTime = targetTime;
+  }
+
+  if (pendingResumePlayback.shouldResumePlaying && video.paused) {
+    void video.play().catch(() => {
+      document.querySelector<HTMLButtonElement>(".ytp-play-button")?.click();
+    });
+  }
+
+  pendingResumePlayback = null;
+  window.setTimeout(() => emitState(), 50);
+}
+
+function refreshPlayerLayout() {
+  syncPlayerOnlyLayout();
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  if (document.body) {
+    document.body.scrollTop = 0;
+  }
+  window.dispatchEvent(new Event("resize"));
+
+  const video = getVideoElement();
+
+  if (video) {
+    video.style.willChange = "transform";
+    window.requestAnimationFrame(() => {
+      video.style.willChange = "";
+      emitState();
+    });
+    return;
+  }
+
+  emitState();
+}
+
 function emitState(status = currentStatus, error = lastError) {
   syncPlayerOnlyLayout();
+  tryResumePlayback();
 
   const state = buildState(status, error);
   const serialized = JSON.stringify(state);
@@ -279,6 +530,7 @@ function handleVideoEvent() {
   syncPlayerOnlyLayout();
   currentStatus = getVideoElement() ? "ready" : "idle";
   lastError = null;
+  tryResumePlayback();
   emitState();
 }
 
@@ -314,6 +566,8 @@ function attachVideoEvents() {
     activeVideo.addEventListener(eventName, handleVideoEvent);
   }
 
+  ensureWatchPagePlayback(activeVideo);
+  tryResumePlayback();
   updateStatus("ready");
 }
 
@@ -424,6 +678,17 @@ ipcRenderer.on("youtube:request-state", () => {
   emitState();
 });
 
+ipcRenderer.on("youtube:resume-playback", (_event, message: ResumePlaybackMessage) => {
+  pendingResumePlayback = message;
+  tryResumePlayback();
+});
+
+ipcRenderer.on("youtube:force-layout", () => {
+  window.setTimeout(() => {
+    refreshPlayerLayout();
+  }, 0);
+});
+
 window.addEventListener("DOMContentLoaded", () => {
   updateStatus("loading");
   syncPlayerOnlyLayout();
@@ -449,4 +714,13 @@ window.addEventListener("load", () => {
   attachVideoEvents();
   syncPlayerOnlyLayout();
   emitState();
+});
+
+document.addEventListener("fullscreenchange", () => {
+  ipcRenderer.send("youtube:fullscreen-change", {
+    active: Boolean(document.fullscreenElement)
+  });
+  window.setTimeout(() => {
+    refreshPlayerLayout();
+  }, 0);
 });
