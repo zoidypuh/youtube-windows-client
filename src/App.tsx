@@ -151,8 +151,6 @@ export default function App() {
 
   const title =
     deferredPlayerState.title.trim() || DEFAULT_PLAYER_STATE.title;
-  const artist =
-    deferredPlayerState.artist.trim() || DEFAULT_PLAYER_STATE.artist;
   const upcomingItems = deferredPlayerState.upcomingItems.slice(0, 8);
   const isSizeLocked = shellState.sizeLockByMode[shellState.mode];
   const videoAspectRatio =
@@ -237,10 +235,16 @@ export default function App() {
       <div className="backdrop" />
       <div ref={shellRef} className="shell" onWheelCapture={handleShellWheel}>
         <header className="topbar">
-          <div>
-            <p className="eyebrow">Persistent YouTube Session</p>
-            <h1>{shellState.mode === "mini" ? "Mini player" : "Full player"}</h1>
-          </div>
+          {shellState.mode === "mini" ? (
+            <div>
+              <p className="eyebrow">Persistent YouTube Session</p>
+              <h1>Mini player</h1>
+            </div>
+          ) : (
+            <div className="topbar-copy topbar-copy--full">
+              <h2 className="topbar-title">{title}</h2>
+            </div>
+          )}
 
           <div className="window-actions">
             {shellState.mode === "full" ? (
@@ -304,28 +308,29 @@ export default function App() {
               </form>
             </section>
 
-            <div className="track-meta">
-              <p className="label">Now playing</p>
-              <h2>{title}</h2>
-              <p className="supporting">{artist}</p>
-              <p className="meta-line">{deferredPlayerState.url}</p>
-            </div>
+            {shellState.mode === "mini" ? (
+              <div className="track-meta">
+                <h2>{title}</h2>
+              </div>
+            ) : null}
 
-            <div className="transport">
-              <button className="icon-button" onClick={() => void shellApi.sendPlayerCommand("play-pause")}>
-                {deferredPlayerState.isPlaying ? "Pause" : "Play"}
-              </button>
-              <button
-                className="icon-button"
-                disabled={!deferredPlayerState.canGoNext}
-                onClick={() => void shellApi.sendPlayerCommand("next")}
-              >
-                Next
-              </button>
-              <button className="icon-button" onClick={() => void shellApi.sendPlayerCommand("mute")}>
-                {deferredPlayerState.isMuted ? "Unmute" : "Mute"}
-              </button>
-            </div>
+            {shellState.mode === "mini" ? (
+              <div className="transport">
+                <button className="icon-button" onClick={() => void shellApi.sendPlayerCommand("play-pause")}>
+                  {deferredPlayerState.isPlaying ? "Pause" : "Play"}
+                </button>
+                <button
+                  className="icon-button"
+                  disabled={!deferredPlayerState.canGoNext}
+                  onClick={() => void shellApi.sendPlayerCommand("next")}
+                >
+                  Next
+                </button>
+                <button className="icon-button" onClick={() => void shellApi.sendPlayerCommand("mute")}>
+                  {deferredPlayerState.isMuted ? "Unmute" : "Mute"}
+                </button>
+              </div>
+            ) : null}
 
             <div className="slider-block">
               <div className="slider-copy">
@@ -360,13 +365,6 @@ export default function App() {
             </div>
 
             <section className="queue-panel">
-              <div className="section-copy">
-                <p className="label">Up Next</p>
-                <p className="section-note">
-                  Playlist entries and YouTube recommendations show up here when the page exposes them.
-                </p>
-              </div>
-
               {upcomingItems.length > 0 ? (
                 <div className="queue-list">
                   {upcomingItems.map((item) => (

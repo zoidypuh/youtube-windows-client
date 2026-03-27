@@ -88,6 +88,8 @@ const VIDEO_EVENTS = [
 ] as const;
 const PLAYER_ONLY_CLASS = "youtube-tray-player-only";
 const PLAYER_ONLY_STYLE_ID = "youtube-tray-player-only-style";
+const PREFERRED_VOLUME_KEY = "youtube-tray-preferred-volume";
+const PREFERRED_MUTED_KEY = "youtube-tray-preferred-muted";
 const PLAYER_ONLY_STYLES = `
   html.${PLAYER_ONLY_CLASS},
   body.${PLAYER_ONLY_CLASS} {
@@ -214,6 +216,10 @@ let scheduledScan = false;
 let pendingResumePlayback: ResumePlaybackMessage | null = null;
 let autoplayWatchUrl = "";
 let autoplayWatchAttempts = 0;
+let preferredVolume = loadPreferredVolume();
+let preferredMuted = loadPreferredMuted();
+let suppressPreferredVolumeCaptureUntil = 0;
+let preferredAudioReapplyTimeouts: number[] = [];
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -237,6 +243,88 @@ function normalizeResumeUrl(rawUrl: string) {
     return parsedUrl.toString();
   } catch {
     return rawUrl;
+  }
+}
+
+function loadPreferredVolume() {
+  try {
+    const storedValue = window.localStorage.getItem(PREFERRED_VOLUME_KEY);
+    const parsedValue = storedValue === null ? Number.NaN : Number(storedValue);
+    return Number.isFinite(parsedValue) ? clamp(parsedValue, 0, 1) : DEFAULT_PLAYER_STATE.volume;
+  } catch {
+    return DEFAULT_PLAYER_STATE.volume;
+  }
+}
+
+function loadPreferredMuted() {
+  try {
+    return window.localStorage.getItem(PREFERRED_MUTED_KEY) === "true";
+  } catch {
+    return DEFAULT_PLAYER_STATE.isMuted;
+  }
+}
+
+function persistPreferredAudioState() {
+  try {
+    window.localStorage.setItem(PREFERRED_VOLUME_KEY, String(preferredVolume));
+    window.localStorage.setItem(PREFERRED_MUTED_KEY, preferredMuted ? "true" : "false");
+  } catch {
+    // Ignore storage failures in the embedded browser context.
+  }
+}
+
+function suppressPreferredVolumeCapture(durationMs = 1200) {
+  suppressPreferredVolumeCaptureUntil = Date.now() + durationMs;
+}
+
+function clearPreferredAudioReapplyTimeouts() {
+  for (const timeoutId of preferredAudioReapplyTimeouts) {
+    window.clearTimeout(timeoutId);
+  }
+
+  preferredAudioReapplyTimeouts = [];
+}
+
+function capturePreferredAudioState(video: HTMLVideoElement | null) {
+  if (!video) {
+    return;
+  }
+
+  preferredVolume = clamp(video.volume, 0, 1);
+  preferredMuted = video.muted;
+  persistPreferredAudioState();
+}
+
+function applyPreferredAudioState(video: HTMLVideoElement | null) {
+  if (!video) {
+    return;
+  }
+
+  const nextVolume = clamp(preferredVolume, 0, 1);
+
+  if (Math.abs(video.volume - nextVolume) > 0.001) {
+    video.volume = nextVolume;
+  }
+
+  if (video.muted !== preferredMuted) {
+    video.muted = preferredMuted;
+  }
+}
+
+function schedulePreferredAudioReapply(video: HTMLVideoElement) {
+  clearPreferredAudioReapplyTimeouts();
+  suppressPreferredVolumeCapture(1400);
+
+  for (const delay of [0, 120, 360, 900]) {
+    const timeoutId = window.setTimeout(() => {
+      if (activeVideo !== video) {
+        return;
+      }
+
+      applyPreferredAudioState(video);
+    }, delay);
+
+    preferredAudioReapplyTimeouts.push(timeoutId);
   }
 }
 
@@ -420,8 +508,8 @@ function buildState(status: PlayerStatus, error: string | null): PlayerState {
     duration: Math.floor(sanitizeNumber(video?.duration ?? 0)),
     videoWidth: Math.floor(sanitizeNumber(video?.videoWidth ?? 0)),
     videoHeight: Math.floor(sanitizeNumber(video?.videoHeight ?? 0)),
-    volume: clamp(video?.volume ?? DEFAULT_PLAYER_STATE.volume, 0, 1),
-    isMuted: video?.muted ?? false,
+    volume: clamp(video?.volume ?? preferredVolume, 0, 1),
+    isMuted: video?.muted ?? preferredMuted,
     isPlaying: Boolean(video && !video.paused && !video.ended),
     canGoNext: Boolean(nextButton && !nextButton.hasAttribute("disabled")),
     hasVideo: Boolean(video),
@@ -552,10 +640,18 @@ function updateStatus(status: PlayerStatus, error: string | null = null) {
   emitState(status, error);
 }
 
-function handleVideoEvent() {
+function handleVideoEvent(event?: Event) {
   syncPlayerOnlyLayout();
   currentStatus = getVideoElement() ? "ready" : "idle";
   lastError = null;
+  if (
+    activeVideo &&
+    event?.type === "volumechange" &&
+    Date.now() >= suppressPreferredVolumeCaptureUntil
+  ) {
+    capturePreferredAudioState(activeVideo);
+  }
+
   if (activeVideo) {
     ensureWatchPagePlayback(activeVideo);
   }
@@ -564,6 +660,8 @@ function handleVideoEvent() {
 }
 
 function detachVideoEvents() {
+  clearPreferredAudioReapplyTimeouts();
+
   if (!activeVideo) {
     return;
   }
@@ -590,6 +688,8 @@ function attachVideoEvents() {
   }
 
   activeVideo = nextVideo;
+  applyPreferredAudioState(activeVideo);
+  schedulePreferredAudioReapply(activeVideo);
 
   for (const eventName of VIDEO_EVENTS) {
     activeVideo.addEventListener(eventName, handleVideoEvent);
@@ -644,12 +744,15 @@ function togglePlayPause() {
 function setVolume(value: number) {
   const video = getVideoElement();
 
-  if (!video) {
-    return;
-  }
+  preferredMuted = false;
+  preferredVolume = clamp(value, 0, 1);
+  persistPreferredAudioState();
+  suppressPreferredVolumeCapture();
 
-  video.muted = false;
-  video.volume = clamp(value, 0, 1);
+  if (video) {
+    video.muted = false;
+    video.volume = preferredVolume;
+  }
 }
 
 function seekTo(value: number) {
@@ -681,8 +784,12 @@ function handleControlMessage(message: PlayerControlMessage) {
           setVolume((video?.volume ?? 0.5) - 0.08);
           break;
         case "mute":
+          preferredMuted = video ? !video.muted : !preferredMuted;
+          persistPreferredAudioState();
+          suppressPreferredVolumeCapture();
+
           if (video) {
-            video.muted = !video.muted;
+            video.muted = preferredMuted;
           }
           break;
       }
@@ -715,6 +822,9 @@ ipcRenderer.on("youtube:resume-playback", (_event, message: ResumePlaybackMessag
 ipcRenderer.on("youtube:force-layout", () => {
   window.setTimeout(() => {
     refreshPlayerLayout();
+    if (activeVideo) {
+      ensureWatchPagePlayback(activeVideo);
+    }
   }, 0);
 });
 

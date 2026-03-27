@@ -8,6 +8,7 @@ import {
   globalShortcut,
   ipcMain,
   nativeImage,
+  screen,
   shell,
   WebContentsView
 } from "electron";
@@ -172,7 +173,9 @@ const windowPresets = {
 >;
 
 let mainWindow: BrowserWindow | null = null;
+let videoFullscreenWindow: BrowserWindow | null = null;
 let youtubeView: WebContentsView | null = null;
+let youtubeViewHostWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let videoBounds: VideoBounds | null = null;
@@ -186,6 +189,10 @@ let lastNormalVideoBounds: RestoredVideoBounds | null = null;
 let pendingFullscreenRestore = false;
 let youtubeDomFullscreenActive = false;
 let fullscreenRestoreTimeout: NodeJS.Timeout | null = null;
+let isApplyingWindowMode = false;
+let isClosingVideoFullscreenWindow = false;
+let mainWindowWasVisibleBeforeVideoFullscreen = true;
+let mainWindowBoundsBeforeVideoFullscreen: Electron.Rectangle | null = null;
 
 function getCurrentPreset() {
   return windowPresets[shellState.mode];
@@ -315,7 +322,14 @@ function getSavedBoundsForMode(mode: WindowMode, fallback?: Electron.Rectangle) 
 }
 
 function rememberCurrentWindowBounds() {
-  if (!mainWindow || mainWindow.isDestroyed() || shellState.isVideoFullscreen) {
+  if (
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    shellState.isVideoFullscreen ||
+    mainWindow.isFullScreen() ||
+    mainWindow.isKiosk() ||
+    isApplyingWindowMode
+  ) {
     return;
   }
 
@@ -329,9 +343,223 @@ function applyWindowResizeLock(mode = shellState.mode) {
     return;
   }
 
+  if (shellState.isVideoFullscreen) {
+    mainWindow.setResizable(true);
+    mainWindow.setMaximizable(true);
+    return;
+  }
+
   const isLocked = shellState.sizeLockByMode[mode];
   mainWindow.setResizable(!isLocked);
   mainWindow.setMaximizable(!isLocked);
+}
+
+function removeYoutubeViewFromHostWindow() {
+  if (
+    !youtubeView ||
+    !youtubeViewHostWindow ||
+    youtubeViewHostWindow.isDestroyed() ||
+    youtubeView.webContents.isDestroyed()
+  ) {
+    return;
+  }
+
+  try {
+    youtubeViewHostWindow.contentView.removeChildView(youtubeView);
+    youtubeViewHostWindow = null;
+  } catch {
+    return;
+  }
+}
+
+function attachYoutubeViewToWindow(targetWindow: BrowserWindow) {
+  if (!youtubeView || youtubeView.webContents.isDestroyed() || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  if (youtubeViewHostWindow === targetWindow) {
+    return;
+  }
+
+  removeYoutubeViewFromHostWindow();
+  targetWindow.contentView.addChildView(youtubeView);
+  youtubeViewHostWindow = targetWindow;
+}
+
+function getVideoFullscreenDisplayBounds() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return screen.getDisplayMatching(mainWindow.getBounds()).bounds;
+  }
+
+  return screen.getPrimaryDisplay().bounds;
+}
+
+function createVideoFullscreenWindow() {
+  if (videoFullscreenWindow && !videoFullscreenWindow.isDestroyed()) {
+    return videoFullscreenWindow;
+  }
+
+  const displayBounds = getVideoFullscreenDisplayBounds();
+  videoFullscreenWindow = new BrowserWindow({
+    x: displayBounds.x,
+    y: displayBounds.y,
+    width: displayBounds.width,
+    height: displayBounds.height,
+    show: false,
+    frame: false,
+    autoHideMenuBar: true,
+    backgroundColor: "#000000",
+    skipTaskbar: true,
+    resizable: true,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: true,
+    focusable: true
+  });
+
+  videoFullscreenWindow.setMenuBarVisibility(false);
+  videoFullscreenWindow.setAlwaysOnTop(true, "screen-saver");
+
+  videoFullscreenWindow.on("resize", () => {
+    syncYoutubeViewBounds();
+  });
+
+  videoFullscreenWindow.on("move", () => {
+    syncYoutubeViewBounds();
+  });
+
+  videoFullscreenWindow.on("close", (event) => {
+    if (isQuitting || isClosingVideoFullscreenWindow) {
+      return;
+    }
+
+    if (!shellState.isVideoFullscreen) {
+      return;
+    }
+
+    event.preventDefault();
+    pendingFullscreenRestore = true;
+
+    if (youtubeView && !youtubeView.webContents.isDestroyed()) {
+      void youtubeView.webContents
+        .executeJavaScript("document.fullscreenElement ? document.exitFullscreen() : undefined", true)
+        .catch(() => undefined);
+    } else {
+      restoreYoutubeViewAfterFullscreen();
+    }
+  });
+
+  videoFullscreenWindow.on("closed", () => {
+    if (videoFullscreenWindow?.isDestroyed()) {
+      videoFullscreenWindow = null;
+    }
+
+    if (isClosingVideoFullscreenWindow) {
+      isClosingVideoFullscreenWindow = false;
+      return;
+    }
+
+    if (shellState.isVideoFullscreen) {
+      pendingFullscreenRestore = true;
+      restoreYoutubeViewAfterFullscreen();
+    }
+  });
+
+  return videoFullscreenWindow;
+}
+
+function syncNativeWindowVideoFullscreen(isVideoFullscreen: boolean) {
+  if (!youtubeView || youtubeView.webContents.isDestroyed()) {
+    return;
+  }
+
+  if (isVideoFullscreen) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindowWasVisibleBeforeVideoFullscreen = mainWindow.isVisible();
+      mainWindowBoundsBeforeVideoFullscreen = mainWindow.isNormal()
+        ? mainWindow.getBounds()
+        : mainWindow.getNormalBounds();
+      mainWindow.hide();
+    }
+
+    const fullscreenWindow = createVideoFullscreenWindow();
+
+    if (!fullscreenWindow) {
+      return;
+    }
+
+    const displayBounds = getVideoFullscreenDisplayBounds();
+    fullscreenWindow.setBounds(displayBounds);
+    attachYoutubeViewToWindow(fullscreenWindow);
+    youtubeView.setBorderRadius(0);
+
+    if (process.platform === "win32") {
+      fullscreenWindow.setKiosk(true);
+    } else {
+      fullscreenWindow.setFullScreen(true);
+    }
+
+    fullscreenWindow.show();
+    fullscreenWindow.focus();
+    youtubeView.webContents.focus();
+    syncYoutubeViewBounds();
+
+    return;
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    attachYoutubeViewToWindow(mainWindow);
+  }
+
+  if (!videoFullscreenWindow || videoFullscreenWindow.isDestroyed()) {
+    videoFullscreenWindow = null;
+  } else {
+    isClosingVideoFullscreenWindow = true;
+    videoFullscreenWindow.setAlwaysOnTop(false);
+
+    if (videoFullscreenWindow.isKiosk()) {
+      videoFullscreenWindow.setKiosk(false);
+    }
+
+    if (videoFullscreenWindow.isFullScreen()) {
+      videoFullscreenWindow.setFullScreen(false);
+    }
+
+    videoFullscreenWindow.close();
+    videoFullscreenWindow = null;
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindowBoundsBeforeVideoFullscreen) {
+    cancelWindowBoundsSave();
+    isApplyingWindowMode = true;
+
+    if (mainWindow.isFullScreen()) {
+      mainWindow.setFullScreen(false);
+    }
+
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    }
+
+    mainWindow.setBounds(mainWindowBoundsBeforeVideoFullscreen);
+    storedWindowBounds[shellState.mode] = normalizeStoredWindowBounds(
+      shellState.mode,
+      mainWindowBoundsBeforeVideoFullscreen
+    );
+    saveStoredWindowBounds();
+
+    setTimeout(() => {
+      isApplyingWindowMode = false;
+      applyWindowResizeLock(shellState.mode);
+    }, 180);
+  }
+
+  mainWindowBoundsBeforeVideoFullscreen = null;
+
+  if (mainWindowWasVisibleBeforeVideoFullscreen) {
+    revealWindow();
+  }
 }
 
 function scheduleWindowBoundsSave() {
@@ -343,6 +571,15 @@ function scheduleWindowBoundsSave() {
     boundsSaveTimeout = null;
     rememberCurrentWindowBounds();
   }, 200);
+}
+
+function cancelWindowBoundsSave() {
+  if (!boundsSaveTimeout) {
+    return;
+  }
+
+  clearTimeout(boundsSaveTimeout);
+  boundsSaveTimeout = null;
 }
 
 function createTrayImage() {
@@ -443,12 +680,12 @@ function rememberNormalVideoBounds(bounds: VideoBounds | null) {
   lastNormalVideoBounds = normalizedBounds;
 }
 
-function getWindowContentBounds() {
-  if (!mainWindow) {
+function getWindowContentBounds(targetWindow: BrowserWindow | null) {
+  if (!targetWindow || targetWindow.isDestroyed()) {
     return null;
   }
 
-  const { width, height } = mainWindow.getContentBounds();
+  const { width, height } = targetWindow.getContentBounds();
 
   if (width <= 0 || height <= 0) {
     return null;
@@ -463,7 +700,12 @@ function syncYoutubeViewBounds() {
   }
 
   if (shellState.isVideoFullscreen) {
-    const fullscreenBounds = getWindowContentBounds();
+    if (!videoFullscreenWindow || videoFullscreenWindow.isDestroyed()) {
+      return;
+    }
+
+    attachYoutubeViewToWindow(videoFullscreenWindow);
+    const fullscreenBounds = getWindowContentBounds(videoFullscreenWindow);
 
     if (!fullscreenBounds) {
       return;
@@ -473,6 +715,10 @@ function syncYoutubeViewBounds() {
     youtubeView.setBounds(fullscreenBounds);
     youtubeView.setVisible(true);
     return;
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    attachYoutubeViewToWindow(mainWindow);
   }
 
   const nextBounds =
@@ -491,6 +737,8 @@ function syncYoutubeViewBounds() {
 
 function setVideoFullscreen(isVideoFullscreen: boolean) {
   if (shellState.isVideoFullscreen === isVideoFullscreen) {
+    applyWindowResizeLock(shellState.mode);
+    syncNativeWindowVideoFullscreen(isVideoFullscreen);
     syncYoutubeViewBounds();
     return;
   }
@@ -500,6 +748,8 @@ function setVideoFullscreen(isVideoFullscreen: boolean) {
   }
 
   shellState.isVideoFullscreen = isVideoFullscreen;
+  applyWindowResizeLock(shellState.mode);
+  syncNativeWindowVideoFullscreen(isVideoFullscreen);
   sendShellState();
   syncYoutubeViewBounds();
 }
@@ -512,7 +762,10 @@ function scheduleFullscreenRestore(delay = 80) {
   fullscreenRestoreTimeout = setTimeout(() => {
     fullscreenRestoreTimeout = null;
 
-    if (!pendingFullscreenRestore || mainWindow?.isFullScreen() || youtubeDomFullscreenActive) {
+    if (
+      !pendingFullscreenRestore ||
+      youtubeDomFullscreenActive
+    ) {
       return;
     }
 
@@ -530,11 +783,15 @@ function restoreYoutubeViewAfterFullscreen() {
 
   if (!youtubeView || youtubeView.webContents.isDestroyed()) {
     shellState.isVideoFullscreen = false;
+    syncNativeWindowVideoFullscreen(false);
+    applyWindowResizeLock(shellState.mode);
     sendShellState();
     return;
   }
 
   shellState.isVideoFullscreen = false;
+  syncNativeWindowVideoFullscreen(false);
+  applyWindowResizeLock(shellState.mode);
   sendShellState();
 
   const restoredBounds = lastNormalVideoBounds ?? normalizeVideoBounds(videoBounds);
@@ -693,10 +950,13 @@ function updateTrayMenu() {
 }
 
 function applyWindowMode(mode: WindowMode) {
+  cancelWindowBoundsSave();
+  isApplyingWindowMode = true;
   shellState.mode = mode;
   updateTrayMenu();
 
   if (!mainWindow) {
+    isApplyingWindowMode = false;
     return;
   }
 
@@ -713,13 +973,38 @@ function applyWindowMode(mode: WindowMode) {
     width: nextBounds.width,
     height: nextBounds.height
   });
+  storedWindowBounds[mode] = normalizeStoredWindowBounds(mode, {
+    x: nextBounds.x ?? currentBounds.x,
+    y: nextBounds.y ?? currentBounds.y,
+    width: nextBounds.width,
+    height: nextBounds.height
+  });
+  saveStoredWindowBounds();
   applyWindowResizeLock(mode);
 
   sendShellState();
   syncYoutubeViewBounds();
+
+  setTimeout(() => {
+    isApplyingWindowMode = false;
+  }, 180);
+
+  if (mode === "full" && youtubeView && !youtubeView.webContents.isDestroyed()) {
+    setTimeout(() => {
+      if (!youtubeView || youtubeView.webContents.isDestroyed() || shellState.mode !== "full") {
+        return;
+      }
+
+      syncYoutubeViewBounds();
+      youtubeView.webContents.invalidate();
+      youtubeView.webContents.send("youtube:force-layout");
+      youtubeView.webContents.send("youtube:request-state");
+    }, 120);
+  }
 }
 
 function toggleWindowSizeLock() {
+  rememberCurrentWindowBounds();
   const nextValue = !shellState.sizeLockByMode[shellState.mode];
   shellState.sizeLockByMode[shellState.mode] = nextValue;
   applyWindowResizeLock(shellState.mode);
@@ -730,9 +1015,6 @@ function toggleWindowSizeLock() {
 function toggleWindowMode() {
   if (shellState.isVideoFullscreen) {
     setVideoFullscreen(false);
-    if (mainWindow?.isFullScreen()) {
-      mainWindow.setFullScreen(false);
-    }
   }
 
   rememberCurrentWindowBounds();
@@ -827,30 +1109,19 @@ function createMainWindow() {
   });
 
   mainWindow.on("resize", () => {
-    scheduleWindowBoundsSave();
+    if (!isApplyingWindowMode) {
+      scheduleWindowBoundsSave();
+    }
+
     syncYoutubeViewBounds();
   });
 
   mainWindow.on("move", () => {
-    scheduleWindowBoundsSave();
+    if (!isApplyingWindowMode) {
+      scheduleWindowBoundsSave();
+    }
   });
 
-  mainWindow.on("leave-full-screen", () => {
-    if (!shellState.isVideoFullscreen && !pendingFullscreenRestore) {
-      syncYoutubeViewBounds();
-      return;
-    }
-
-    pendingFullscreenRestore = true;
-
-    if (youtubeView && !youtubeView.webContents.isDestroyed() && youtubeDomFullscreenActive) {
-      void youtubeView.webContents
-        .executeJavaScript("document.fullscreenElement ? document.exitFullscreen() : undefined", true)
-        .catch(() => undefined);
-    }
-
-    scheduleFullscreenRestore(youtubeDomFullscreenActive ? 260 : 80);
-  });
 }
 
 function createYoutubeView() {
@@ -876,6 +1147,7 @@ function createYoutubeView() {
   youtubeView.setVisible(false);
   youtubeView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
   mainWindow.contentView.addChildView(youtubeView);
+  youtubeViewHostWindow = mainWindow;
 
   youtubeView.webContents.setWindowOpenHandler(({ url }) => {
     if (isTrustedYoutubeNavigation(url)) {
@@ -949,26 +1221,14 @@ function createYoutubeView() {
 
   youtubeView.webContents.on("enter-html-full-screen", () => {
     youtubeDomFullscreenActive = true;
+    pendingFullscreenRestore = false;
     setVideoFullscreen(true);
-
-    if (!mainWindow?.isFullScreen()) {
-      mainWindow?.setFullScreen(true);
-    }
   });
 
   youtubeView.webContents.on("leave-html-full-screen", () => {
     youtubeDomFullscreenActive = false;
-
-    if (mainWindow?.isFullScreen()) {
-      pendingFullscreenRestore = true;
-      mainWindow.setFullScreen(false);
-      return;
-    }
-
-    if (pendingFullscreenRestore || shellState.isVideoFullscreen) {
-      pendingFullscreenRestore = true;
-      scheduleFullscreenRestore(60);
-    }
+    pendingFullscreenRestore = true;
+    scheduleFullscreenRestore(60);
   });
 
   void youtubeView.webContents.loadURL(getInitialYoutubeUrl());
@@ -996,7 +1256,7 @@ function registerIpc() {
 
     youtubeDomFullscreenActive = isActive;
 
-    if (!isActive && pendingFullscreenRestore && !mainWindow?.isFullScreen()) {
+    if (!isActive && pendingFullscreenRestore) {
       scheduleFullscreenRestore(40);
     }
   });
@@ -1020,7 +1280,7 @@ function registerIpc() {
   });
 
   ipcMain.handle("shell:set-video-bounds", (_event, bounds: VideoBounds | null) => {
-    if (shellState.isVideoFullscreen || mainWindow?.isFullScreen()) {
+    if (shellState.isVideoFullscreen) {
       return;
     }
 
