@@ -71,6 +71,7 @@ contextBridge.exposeInMainWorld("youtubeTray", {
   seekPlayer: (value: number) => ipcRenderer.invoke("player:seek-to", value) as Promise<void>,
   searchYoutube: (query: string) => ipcRenderer.invoke("youtube:search", query) as Promise<void>,
   openYoutubeUrl: (url: string) => ipcRenderer.invoke("youtube:open-url", url) as Promise<void>,
+  openExternalUrl: (url: string) => ipcRenderer.invoke("shell:open-external-url", url) as Promise<void>,
   openYoutubeHome: () => ipcRenderer.invoke("youtube:open-home") as Promise<void>,
   setVideoBounds: (bounds: VideoBounds | null) =>
     ipcRenderer.invoke("shell:set-video-bounds", bounds) as Promise<void>,

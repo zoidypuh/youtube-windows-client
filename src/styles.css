@@ -350,6 +350,13 @@ input[type="range"] {
   justify-content: center;
 }
 
+.external-search-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 4px 0;
+}
+
 .track-meta h2 {
   margin: 0;
   font-size: clamp(1.4rem, 1rem + 1.1vw, 2.2rem);

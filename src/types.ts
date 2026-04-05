@@ -68,6 +68,7 @@ export type ShellApi = {
   setPlayerVolume: (value: number) => Promise<void>;
   seekPlayer: (value: number) => Promise<void>;
   searchYoutube: (query: string) => Promise<void>;
+  openExternalUrl: (url: string) => Promise<void>;
   openYoutubeUrl: (url: string) => Promise<void>;
   openYoutubeHome: () => Promise<void>;
   setVideoBounds: (bounds: VideoBounds | null) => Promise<void>;

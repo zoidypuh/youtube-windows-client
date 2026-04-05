@@ -143,6 +143,24 @@ export default function App() {
     }
   }, [shellState.mode]);
 
+  const hasSong =
+    deferredPlayerState.title.trim() !== "" &&
+    deferredPlayerState.title !== "Opening YouTube";
+
+  const openInAppleMusic = () => {
+    const term = encodeURIComponent(
+      `${deferredPlayerState.title} ${deferredPlayerState.artist}`.trim()
+    );
+    void shellApi.openExternalUrl(`https://music.apple.com/search?term=${term}`);
+  };
+
+  const openInSpotify = () => {
+    const term = encodeURIComponent(
+      `${deferredPlayerState.title} ${deferredPlayerState.artist}`.trim()
+    );
+    void shellApi.openExternalUrl(`https://open.spotify.com/search/${term}`);
+  };
+
   const displayVolume = deferredPlayerState.isMuted ? 0 : deferredPlayerState.volume;
   const progressValue = Math.min(
     deferredPlayerState.currentTime,
@@ -328,6 +346,17 @@ export default function App() {
                 </button>
                 <button className="icon-button" onClick={() => void shellApi.sendPlayerCommand("mute")}>
                   {deferredPlayerState.isMuted ? "Unmute" : "Mute"}
+                </button>
+              </div>
+            ) : null}
+
+            {hasSong ? (
+              <div className="external-search-actions">
+                <button className="ghost-button" type="button" onClick={openInAppleMusic}>
+                  Apple Music
+                </button>
+                <button className="ghost-button" type="button" onClick={openInSpotify}>
+                  Spotify
                 </button>
               </div>
             ) : null}

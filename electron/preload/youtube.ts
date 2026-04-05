@@ -220,6 +220,7 @@ let preferredVolume = loadPreferredVolume();
 let preferredMuted = loadPreferredMuted();
 let suppressPreferredVolumeCaptureUntil = 0;
 let preferredAudioReapplyTimeouts: number[] = [];
+let audioControlIntentUntil = 0;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -277,6 +278,14 @@ function suppressPreferredVolumeCapture(durationMs = 1200) {
   suppressPreferredVolumeCaptureUntil = Date.now() + durationMs;
 }
 
+function markAudioControlIntent(durationMs = 1800) {
+  audioControlIntentUntil = Date.now() + durationMs;
+}
+
+function hasRecentAudioControlIntent() {
+  return Date.now() <= audioControlIntentUntil;
+}
+
 function clearPreferredAudioReapplyTimeouts() {
   for (const timeoutId of preferredAudioReapplyTimeouts) {
     window.clearTimeout(timeoutId);
@@ -313,9 +322,9 @@ function applyPreferredAudioState(video: HTMLVideoElement | null) {
 
 function schedulePreferredAudioReapply(video: HTMLVideoElement) {
   clearPreferredAudioReapplyTimeouts();
-  suppressPreferredVolumeCapture(1400);
+  suppressPreferredVolumeCapture(5200);
 
-  for (const delay of [0, 120, 360, 900]) {
+  for (const delay of [0, 120, 360, 900, 1800, 3200, 4800]) {
     const timeoutId = window.setTimeout(() => {
       if (activeVideo !== video) {
         return;
@@ -495,10 +504,32 @@ function getTrackArtist() {
   return channel?.textContent?.trim() || DEFAULT_PLAYER_STATE.artist;
 }
 
+function getDisplayAudioState(video: HTMLVideoElement | null) {
+  if (!video) {
+    return {
+      volume: preferredVolume,
+      isMuted: preferredMuted
+    };
+  }
+
+  if (Date.now() < suppressPreferredVolumeCaptureUntil) {
+    return {
+      volume: preferredVolume,
+      isMuted: preferredMuted
+    };
+  }
+
+  return {
+    volume: clamp(video.volume, 0, 1),
+    isMuted: video.muted
+  };
+}
+
 function buildState(status: PlayerStatus, error: string | null): PlayerState {
   const video = getVideoElement();
   const metadata = getMediaSessionMetadata();
   const nextButton = getNextButton();
+  const audioState = getDisplayAudioState(video);
 
   return {
     status,
@@ -508,8 +539,8 @@ function buildState(status: PlayerStatus, error: string | null): PlayerState {
     duration: Math.floor(sanitizeNumber(video?.duration ?? 0)),
     videoWidth: Math.floor(sanitizeNumber(video?.videoWidth ?? 0)),
     videoHeight: Math.floor(sanitizeNumber(video?.videoHeight ?? 0)),
-    volume: clamp(video?.volume ?? preferredVolume, 0, 1),
-    isMuted: video?.muted ?? preferredMuted,
+    volume: audioState.volume,
+    isMuted: audioState.isMuted,
     isPlaying: Boolean(video && !video.paused && !video.ended),
     canGoNext: Boolean(nextButton && !nextButton.hasAttribute("disabled")),
     hasVideo: Boolean(video),
@@ -644,12 +675,24 @@ function handleVideoEvent(event?: Event) {
   syncPlayerOnlyLayout();
   currentStatus = getVideoElement() ? "ready" : "idle";
   lastError = null;
-  if (
-    activeVideo &&
-    event?.type === "volumechange" &&
-    Date.now() >= suppressPreferredVolumeCaptureUntil
-  ) {
-    capturePreferredAudioState(activeVideo);
+
+  if (activeVideo && event?.type === "volumechange") {
+    if (Date.now() < suppressPreferredVolumeCaptureUntil) {
+      // Ignore the cascade of volume writes while a new YouTube video element settles.
+    } else if (hasRecentAudioControlIntent()) {
+      capturePreferredAudioState(activeVideo);
+    } else if (
+      Math.abs(activeVideo.volume - preferredVolume) > 0.01 ||
+      activeVideo.muted !== preferredMuted
+    ) {
+      suppressPreferredVolumeCapture(1200);
+      window.setTimeout(() => {
+        if (activeVideo !== null) {
+          applyPreferredAudioState(activeVideo);
+          emitState();
+        }
+      }, 0);
+    }
   }
 
   if (activeVideo) {
@@ -744,6 +787,7 @@ function togglePlayPause() {
 function setVolume(value: number) {
   const video = getVideoElement();
 
+  markAudioControlIntent();
   preferredMuted = false;
   preferredVolume = clamp(value, 0, 1);
   persistPreferredAudioState();
@@ -778,12 +822,15 @@ function handleControlMessage(message: PlayerControlMessage) {
           clickNextButton();
           break;
         case "volume-up":
+          markAudioControlIntent();
           setVolume((video?.volume ?? 0.5) + 0.08);
           break;
         case "volume-down":
+          markAudioControlIntent();
           setVolume((video?.volume ?? 0.5) - 0.08);
           break;
         case "mute":
+          markAudioControlIntent();
           preferredMuted = video ? !video.muted : !preferredMuted;
           persistPreferredAudioState();
           suppressPreferredVolumeCapture();
@@ -832,6 +879,28 @@ window.addEventListener("DOMContentLoaded", () => {
   updateStatus("loading");
   syncPlayerOnlyLayout();
   attachVideoEvents();
+
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target;
+
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    if (
+      target.closest(
+        ".ytp-volume-area, .ytp-volume-panel, .ytp-volume-slider, .ytp-mute-button, .ytp-volume-panel-handle"
+      )
+    ) {
+      markAudioControlIntent(2200);
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowUp" || event.key === "ArrowDown" || event.key.toLowerCase() === "m") {
+      markAudioControlIntent(1500);
+    }
+  });
 
   mutationObserver = new MutationObserver(() => {
     scheduleAttachVideoEvents();

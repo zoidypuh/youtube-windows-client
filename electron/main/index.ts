@@ -1070,7 +1070,7 @@ function createMainWindow() {
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
-      nodeIntegration: false,
+      nodeIntegration: true,
       sandbox: false
     }
   });
@@ -1106,6 +1106,36 @@ function createMainWindow() {
   mainWindow.webContents.on("did-finish-load", () => {
     sendShellState();
     sendPlayerState();
+  });
+
+  mainWindow.webContents.on(
+    "did-fail-load",
+    (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
+      if (!isMainFrame) {
+        return;
+      }
+
+      console.error("[renderer] did-fail-load", {
+        errorCode,
+        errorDescription,
+        validatedUrl
+      });
+    }
+  );
+
+  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const levelLabel =
+      level === 0 ? "verbose" : level === 1 ? "info" : level === 2 ? "warning" : "error";
+    console[levelLabel === "error" ? "error" : "log"]("[renderer]", {
+      level: levelLabel,
+      message,
+      line,
+      sourceId
+    });
+  });
+
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[renderer] render-process-gone", details);
   });
 
   mainWindow.on("resize", () => {
@@ -1305,6 +1335,10 @@ function registerIpc() {
 
   ipcMain.handle("youtube:open-url", (_event, url: string) => {
     navigateYoutube(url);
+  });
+
+  ipcMain.handle("shell:open-external-url", (_event, url: string) => {
+    void shell.openExternal(url);
   });
 
   ipcMain.handle("youtube:open-home", () => {
