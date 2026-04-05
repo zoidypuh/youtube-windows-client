@@ -50,6 +50,7 @@ const fallbackShellApi: ShellApi = {
   setPlayerVolume: async () => undefined,
   seekPlayer: async () => undefined,
   searchYoutube: async () => undefined,
+  openExternalUrl: async () => undefined,
   openYoutubeUrl: async () => undefined,
   openYoutubeHome: async () => undefined,
   setVideoBounds: async () => undefined,
