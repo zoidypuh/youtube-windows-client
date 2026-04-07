@@ -2,15 +2,25 @@
 
 Electron-based Windows tray shell for regular YouTube, built with Electron, React, and Vite.
 
-## Current State
+## Status
 
-This repository contains the current desktop shell:
+Almost production ready.
+
+The core desktop shell is working, packaging is set up, and the app can be built and run by someone else without extra local context. There are still a few small bugs to polish in live YouTube behavior and general runtime edge cases.
+
+## Current State
 
 - tray integration with close-to-tray behavior
 - mini and full window modes
 - a persistent YouTube `WebContentsView` with its own preload and profile partition
 - a React renderer that mirrors the live embedded player state
 - Windows build, run, and packaging scripts
+
+## Requirements
+
+- Windows 10 or Windows 11
+- Node.js 24.x
+- npm 11.x
 
 ## Development
 
@@ -42,6 +52,8 @@ That script installs dependencies if needed, builds the app, and starts Electron
 npm run dist
 ```
 
+This produces the Windows installer in `release/`.
+
 ## Shortcuts
 
 - `Ctrl+Alt+Space` play/pause
@@ -57,3 +69,4 @@ npm run dist
 - The app targets Windows first.
 - `npm start` expects a completed production build in `dist/` and `dist-electron/`.
 - The YouTube session is persisted through the Electron profile partition used by the embedded view.
+- If you hit small runtime issues, build and run natively on Windows before debugging anything through WSL.
