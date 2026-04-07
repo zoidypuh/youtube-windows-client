@@ -1,12 +1,12 @@
 # YouTube Tray
 
-Electron-based Windows tray shell for regular YouTube, built with Electron, React, and Vite.
+A Windows tray app for people who use YouTube like a music player and want fast, separate controls without hunting for the right browser tab.
 
 ## Status
 
 Almost production ready.
 
-The core desktop shell is working, packaging is set up, and the app can be built and run by someone else without extra local context. There are still a few small bugs to polish in live YouTube behavior and general runtime edge cases.
+The core desktop shell is working, packaging is set up, and the app can be built and run by someone else without extra local context. It is meant for people who keep YouTube running in the background and want play/pause, next-track, window visibility, and volume control in a dedicated desktop shell. There are still a few small bugs to polish in live YouTube behavior and general runtime edge cases.
 
 ## Current State
 
