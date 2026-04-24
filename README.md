@@ -8,6 +8,12 @@ Final.
 
 The desktop shell, launcher, build scripts, packaging configuration, and setup documentation are complete. The app is meant for people who keep YouTube running in the background and want play/pause, next-track, window visibility, and volume control in a dedicated desktop shell.
 
+## Screenshots
+
+![YouTube Tray mini player](docs/screenshots/mini-player.png)
+
+![YouTube Tray full player](docs/screenshots/full-player.png)
+
 ## Supported Environment
 
 Run and package the app from Windows 10 or Windows 11. WSL, macOS, and Linux are useful for editing files, but the Electron runtime and installer flow are Windows-first and should be verified from Windows PowerShell or Command Prompt.
