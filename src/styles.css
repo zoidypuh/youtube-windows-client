@@ -147,7 +147,8 @@ input[type="range"] {
 }
 
 .ghost-button,
-.icon-button {
+.icon-button,
+.heart-button {
   border-radius: 999px;
   padding: 10px 14px;
   color: #f6f3ef;
@@ -175,9 +176,35 @@ input[type="range"] {
   font-weight: 700;
 }
 
+.heart-button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  border: 1px solid rgba(255, 125, 156, 0.3);
+  background: rgba(255, 86, 127, 0.1);
+  color: #ff8faf;
+  font-size: 1.08rem;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.heart-button--active {
+  border-color: rgba(255, 86, 127, 0.82);
+  background: linear-gradient(180deg, rgba(255, 86, 127, 0.34), rgba(255, 149, 71, 0.12));
+  color: #ffd8e2;
+  box-shadow: 0 0 18px rgba(255, 86, 127, 0.22);
+}
+
 .ghost-button:hover,
-.icon-button:hover {
+.icon-button:hover,
+.heart-button:hover {
   transform: translateY(-1px);
+}
+
+.heart-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  transform: none;
 }
 
 .content {

@@ -20,5 +20,5 @@ call npm run build
 if errorlevel 1 exit /b %errorlevel%
 
 echo Starting app...
-call npm start
-exit /b %errorlevel%
+start "YouTube Tray" npm start
+exit /b 0

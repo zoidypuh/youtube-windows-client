@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 type WindowMode = "mini" | "full";
-type PlayerCommand = "play-pause" | "next" | "volume-up" | "volume-down" | "mute";
+type PlayerCommand = "play-pause" | "next" | "volume-up" | "volume-down" | "mute" | "like";
 type PlayerStatus = "loading" | "ready" | "idle" | "error";
 
 type VideoBounds = {
@@ -32,6 +32,7 @@ type PlayerState = {
   volume: number;
   isMuted: boolean;
   isPlaying: boolean;
+  isLiked: boolean;
   canGoNext: boolean;
   hasVideo: boolean;
   url: string;

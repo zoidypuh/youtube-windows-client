@@ -1,6 +1,6 @@
 export type WindowMode = "mini" | "full";
 
-export type PlayerCommand = "play-pause" | "next" | "volume-up" | "volume-down" | "mute";
+export type PlayerCommand = "play-pause" | "next" | "volume-up" | "volume-down" | "mute" | "like";
 
 export type VideoBounds = {
   x: number;
@@ -32,6 +32,7 @@ export type PlayerState = {
   volume: number;
   isMuted: boolean;
   isPlaying: boolean;
+  isLiked: boolean;
   canGoNext: boolean;
   hasVideo: boolean;
   url: string;

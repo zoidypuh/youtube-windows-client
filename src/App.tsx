@@ -198,6 +198,10 @@ export default function App() {
     void shellApi.openYoutubeUrl(item.url);
   };
 
+  const likeCurrentVideo = () => {
+    void shellApi.sendPlayerCommand("like");
+  };
+
   const handleShellWheel = (event: WheelEvent<HTMLDivElement>) => {
     if (shellState.mode !== "mini" || !shellRef.current) {
       return;
@@ -298,6 +302,15 @@ export default function App() {
                   onChange={(event) => setSearchQuery(event.target.value)}
                 />
                 <div className="search-actions">
+                  <button
+                    className={`heart-button${deferredPlayerState.isLiked ? " heart-button--active" : ""}`}
+                    type="button"
+                    aria-label={deferredPlayerState.isLiked ? "Current video liked" : "Like current video"}
+                    title={deferredPlayerState.isLiked ? "Current video liked" : "Like current video"}
+                    onClick={likeCurrentVideo}
+                  >
+                    {deferredPlayerState.isLiked ? "♥" : "♡"}
+                  </button>
                   <button className="ghost-button" type="button" onClick={() => void shellApi.openYoutubeHome()}>
                     Browse
                   </button>

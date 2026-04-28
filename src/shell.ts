@@ -29,6 +29,7 @@ export const DEFAULT_PLAYER_STATE: PlayerState = {
   volume: 1,
   isMuted: false,
   isPlaying: false,
+  isLiked: false,
   canGoNext: false,
   hasVideo: false,
   url: "https://www.youtube.com/",

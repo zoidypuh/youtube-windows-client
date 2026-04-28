@@ -1,6 +1,6 @@
 import { ipcRenderer } from "electron";
 
-type PlayerCommand = "play-pause" | "next" | "volume-up" | "volume-down" | "mute";
+type PlayerCommand = "play-pause" | "next" | "volume-up" | "volume-down" | "mute" | "like";
 type PlayerControlMessage =
   | {
       type: "command";
@@ -44,6 +44,7 @@ type PlayerState = {
   volume: number;
   isMuted: boolean;
   isPlaying: boolean;
+  isLiked: boolean;
   canGoNext: boolean;
   hasVideo: boolean;
   url: string;
@@ -64,6 +65,7 @@ const DEFAULT_PLAYER_STATE: PlayerState = {
   volume: 1,
   isMuted: false,
   isPlaying: false,
+  isLiked: false,
   canGoNext: false,
   hasVideo: false,
   url: window.location.href,
@@ -349,6 +351,53 @@ function getNextButton() {
   );
 }
 
+function getLikeButton() {
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLButtonElement | HTMLAnchorElement>(
+      [
+        'segmented-like-dislike-button-view-model button',
+        'like-button-view-model button',
+        'ytd-toggle-button-renderer button',
+        'button[aria-label]',
+        'button[title]'
+      ].join(", ")
+    )
+  );
+
+  return candidates.find((candidate) => {
+    const ariaLabel = candidate.getAttribute("aria-label")?.toLowerCase() ?? "";
+    const title = candidate.getAttribute("title")?.toLowerCase() ?? "";
+    const text = getTextContent(candidate).toLowerCase();
+    const combined = `${ariaLabel} ${title} ${text}`;
+
+    return (
+      (combined.includes("like") || combined.includes("me gusta")) &&
+      !combined.includes("dislike") &&
+      !combined.includes("no me gusta")
+    );
+  }) ?? null;
+}
+
+function isLikeButtonActive(button: HTMLButtonElement | HTMLAnchorElement | null) {
+  if (!button) {
+    return false;
+  }
+
+  const ariaPressed = button.getAttribute("aria-pressed");
+  const ariaLabel = button.getAttribute("aria-label")?.toLowerCase() ?? "";
+  const title = button.getAttribute("title")?.toLowerCase() ?? "";
+
+  return (
+    ariaPressed === "true" ||
+    button.classList.contains("style-default-active") ||
+    button.closest(".style-default-active") !== null ||
+    ariaLabel.includes("unlike") ||
+    ariaLabel.includes("remove like") ||
+    title.includes("unlike") ||
+    title.includes("remove like")
+  );
+}
+
 function getTextContent(element: Element | null | undefined) {
   return element?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 }
@@ -529,6 +578,7 @@ function buildState(status: PlayerStatus, error: string | null): PlayerState {
   const video = getVideoElement();
   const metadata = getMediaSessionMetadata();
   const nextButton = getNextButton();
+  const likeButton = getLikeButton();
   const audioState = getDisplayAudioState(video);
 
   return {
@@ -542,6 +592,7 @@ function buildState(status: PlayerStatus, error: string | null): PlayerState {
     volume: audioState.volume,
     isMuted: audioState.isMuted,
     isPlaying: Boolean(video && !video.paused && !video.ended),
+    isLiked: isLikeButtonActive(likeButton),
     canGoNext: Boolean(nextButton && !nextButton.hasAttribute("disabled")),
     hasVideo: Boolean(video),
     url: window.location.href,
@@ -767,6 +818,18 @@ function clickNextButton() {
   nextButton.click();
 }
 
+function likeCurrentVideo() {
+  const likeButton = getLikeButton();
+
+  if (!likeButton || isLikeButtonActive(likeButton)) {
+    return;
+  }
+
+  likeButton.click();
+  window.setTimeout(() => emitState(), 250);
+  window.setTimeout(() => emitState(), 900);
+}
+
 function togglePlayPause() {
   const video = getVideoElement();
 
@@ -820,6 +883,9 @@ function handleControlMessage(message: PlayerControlMessage) {
           break;
         case "next":
           clickNextButton();
+          break;
+        case "like":
+          likeCurrentVideo();
           break;
         case "volume-up":
           markAudioControlIntent();
