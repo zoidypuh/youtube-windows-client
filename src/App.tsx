@@ -36,7 +36,7 @@ function createSpotifySearchUrl(query: string) {
 }
 
 function createAppleMusicSearchUrl(query: string) {
-  const url = new URL("https://music.apple.com/us/search");
+  const url = new URL("https://beta.music.apple.com/us/search");
   url.searchParams.set("term", query);
   return url.toString();
 }
