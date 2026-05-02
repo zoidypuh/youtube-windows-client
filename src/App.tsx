@@ -24,11 +24,23 @@ function createMusicSearchQuery(playerState: PlayerState) {
     return "";
   }
 
-  if (!artist || artist === DEFAULT_PLAYER_STATE.artist) {
+  if (/\s[-–—]\s/.test(title)) {
     return title;
   }
 
-  return title.toLowerCase().includes(artist.toLowerCase()) ? title : `${artist} ${title}`;
+  const normalizedArtist = artist
+    .replace(/\s*-\s*Topic$/i, "")
+    .replace(/\s*VEVO$/i, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim();
+
+  if (!normalizedArtist || normalizedArtist === DEFAULT_PLAYER_STATE.artist) {
+    return title;
+  }
+
+  return title.toLowerCase().includes(normalizedArtist.toLowerCase())
+    ? title
+    : `${normalizedArtist} ${title}`;
 }
 
 function createSpotifySearchUrl(query: string) {
