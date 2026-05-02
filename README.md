@@ -98,6 +98,15 @@ For Windows, you can also use the repo-local launcher:
 ```
 
 That script installs dependencies if `node_modules/` is missing, builds the app, and starts Electron from the repo root.
+It starts the long-running Electron process in a hidden background console.
+
+For a fully hidden double-click launcher, use:
+
+```powershell
+wscript .\yt-music-client-hidden.vbs
+```
+
+That wrapper hides the launcher window itself too. Use `.\yt-music-client.cmd` when you want to see install/build diagnostics.
 
 ## Packaging
 

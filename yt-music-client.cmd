@@ -20,5 +20,6 @@ call npm run build
 if errorlevel 1 exit /b %errorlevel%
 
 echo Starting app...
-start "YouTube Tray" /min npm start
+set "YTMUSICCLIENT_DIR=%CD%"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath 'cmd.exe' -WorkingDirectory $env:YTMUSICCLIENT_DIR -WindowStyle Hidden -ArgumentList '/d','/s','/c','npm start'"
 exit /b 0
