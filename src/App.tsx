@@ -16,6 +16,31 @@ function formatSeconds(seconds: number) {
   return `${minutes}:${remainder.toString().padStart(2, "0")}`;
 }
 
+function createMusicSearchQuery(playerState: PlayerState) {
+  const title = playerState.title.trim();
+  const artist = playerState.artist.trim();
+
+  if (!title || title === DEFAULT_PLAYER_STATE.title || title === "YouTube") {
+    return "";
+  }
+
+  if (!artist || artist === DEFAULT_PLAYER_STATE.artist) {
+    return title;
+  }
+
+  return title.toLowerCase().includes(artist.toLowerCase()) ? title : `${artist} ${title}`;
+}
+
+function createSpotifySearchUrl(query: string) {
+  return `https://open.spotify.com/search/${encodeURIComponent(query)}`;
+}
+
+function createAppleMusicSearchUrl(query: string) {
+  const url = new URL("https://music.apple.com/us/search");
+  url.searchParams.set("term", query);
+  return url.toString();
+}
+
 export default function App() {
   const [shellState, setShellState] = useState<ShellState>(DEFAULT_SHELL_STATE);
   const [playerState, setPlayerState] = useState<PlayerState>(DEFAULT_PLAYER_STATE);
@@ -151,6 +176,7 @@ export default function App() {
 
   const title =
     deferredPlayerState.title.trim() || DEFAULT_PLAYER_STATE.title;
+  const musicSearchQuery = createMusicSearchQuery(deferredPlayerState);
   const upcomingItems = deferredPlayerState.upcomingItems.slice(0, 8);
   const isSizeLocked = shellState.sizeLockByMode[shellState.mode];
   const videoAspectRatio =
@@ -200,6 +226,19 @@ export default function App() {
 
   const likeCurrentVideo = () => {
     void shellApi.sendPlayerCommand("like");
+  };
+
+  const openMusicSearch = (service: "spotify" | "apple-music") => {
+    if (!musicSearchQuery) {
+      return;
+    }
+
+    const url =
+      service === "spotify"
+        ? createSpotifySearchUrl(musicSearchQuery)
+        : createAppleMusicSearchUrl(musicSearchQuery);
+
+    void shellApi.openExternalUrl(url);
   };
 
   const handleShellWheel = (event: WheelEvent<HTMLDivElement>) => {
@@ -302,6 +341,26 @@ export default function App() {
                   onChange={(event) => setSearchQuery(event.target.value)}
                 />
                 <div className="search-actions">
+                  <button
+                    className="music-link-button music-link-button--spotify"
+                    type="button"
+                    disabled={!musicSearchQuery}
+                    aria-label="Open current song in Spotify"
+                    title="Open current song in Spotify"
+                    onClick={() => openMusicSearch("spotify")}
+                  >
+                    Spotify
+                  </button>
+                  <button
+                    className="music-link-button music-link-button--apple"
+                    type="button"
+                    disabled={!musicSearchQuery}
+                    aria-label="Open current song in Apple Music"
+                    title="Open current song in Apple Music"
+                    onClick={() => openMusicSearch("apple-music")}
+                  >
+                    Apple
+                  </button>
                   <button
                     className={`heart-button${deferredPlayerState.isLiked ? " heart-button--active" : ""}`}
                     type="button"
