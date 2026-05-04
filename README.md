@@ -69,8 +69,8 @@ npm --version
 ## Clone and Install
 
 ```powershell
-git clone https://github.com/zoidypuh/yt-music-client.git
-cd yt-music-client
+git clone https://github.com/zoidypuh/youtube-windows-client.git
+cd youtube-windows-client
 npm install
 ```
 

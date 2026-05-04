@@ -223,6 +223,7 @@ let preferredMuted = loadPreferredMuted();
 let suppressPreferredVolumeCaptureUntil = 0;
 let preferredAudioReapplyTimeouts: number[] = [];
 let audioControlIntentUntil = 0;
+let activeMediaKey = "";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -322,6 +323,18 @@ function applyPreferredAudioState(video: HTMLVideoElement | null) {
   }
 }
 
+function getMediaKey(video: HTMLVideoElement | null) {
+  if (!video) {
+    return "";
+  }
+
+  return [
+    normalizeResumeUrl(window.location.href),
+    video.currentSrc || video.src,
+    Number.isFinite(video.duration) ? Math.floor(video.duration) : 0
+  ].join("|");
+}
+
 function schedulePreferredAudioReapply(video: HTMLVideoElement) {
   clearPreferredAudioReapplyTimeouts();
   suppressPreferredVolumeCapture(5200);
@@ -337,6 +350,18 @@ function schedulePreferredAudioReapply(video: HTMLVideoElement) {
 
     preferredAudioReapplyTimeouts.push(timeoutId);
   }
+}
+
+function refreshMediaAudioState(video: HTMLVideoElement) {
+  const mediaKey = getMediaKey(video);
+
+  if (mediaKey === activeMediaKey) {
+    return;
+  }
+
+  activeMediaKey = mediaKey;
+  applyPreferredAudioState(video);
+  schedulePreferredAudioReapply(video);
 }
 
 function getVideoElement() {
@@ -727,6 +752,10 @@ function handleVideoEvent(event?: Event) {
   currentStatus = getVideoElement() ? "ready" : "idle";
   lastError = null;
 
+  if (activeVideo) {
+    refreshMediaAudioState(activeVideo);
+  }
+
   if (activeVideo && event?.type === "volumechange") {
     if (Date.now() < suppressPreferredVolumeCaptureUntil) {
       // Ignore the cascade of volume writes while a new YouTube video element settles.
@@ -782,6 +811,7 @@ function attachVideoEvents() {
   }
 
   activeVideo = nextVideo;
+  activeMediaKey = getMediaKey(activeVideo);
   applyPreferredAudioState(activeVideo);
   schedulePreferredAudioReapply(activeVideo);
 
@@ -889,15 +919,15 @@ function handleControlMessage(message: PlayerControlMessage) {
           break;
         case "volume-up":
           markAudioControlIntent();
-          setVolume((video?.volume ?? 0.5) + 0.08);
+          setVolume(preferredVolume + 0.08);
           break;
         case "volume-down":
           markAudioControlIntent();
-          setVolume((video?.volume ?? 0.5) - 0.08);
+          setVolume(preferredVolume - 0.08);
           break;
         case "mute":
           markAudioControlIntent();
-          preferredMuted = video ? !video.muted : !preferredMuted;
+          preferredMuted = !preferredMuted;
           persistPreferredAudioState();
           suppressPreferredVolumeCapture();
 
