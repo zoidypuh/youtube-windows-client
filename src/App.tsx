@@ -220,6 +220,32 @@ export default function App() {
       </div>
     </>
   );
+  const transportControls = (
+    <div className="transport transport--search">
+      <button
+        className="icon-button"
+        type="button"
+        onClick={() => void shellApi.sendPlayerCommand("play-pause")}
+      >
+        {deferredPlayerState.isPlaying ? "Pause" : "Play"}
+      </button>
+      <button
+        className="icon-button"
+        type="button"
+        disabled={!deferredPlayerState.canGoNext}
+        onClick={() => void shellApi.sendPlayerCommand("next")}
+      >
+        Next
+      </button>
+      <button
+        className="icon-button"
+        type="button"
+        onClick={() => void shellApi.sendPlayerCommand("mute")}
+      >
+        {deferredPlayerState.isMuted ? "Unmute" : "Mute"}
+      </button>
+    </div>
+  );
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -385,9 +411,7 @@ export default function App() {
                   <button className="ghost-button" type="button" onClick={() => void shellApi.openYoutubeHome()}>
                     Browse
                   </button>
-                  <button className="icon-button" type="submit">
-                    Search
-                  </button>
+                  {transportControls}
                 </div>
               </form>
             </section>
@@ -395,24 +419,6 @@ export default function App() {
             {shellState.mode === "mini" ? (
               <div className="track-meta">
                 <h2>{title}</h2>
-              </div>
-            ) : null}
-
-            {shellState.mode === "mini" ? (
-              <div className="transport">
-                <button className="icon-button" onClick={() => void shellApi.sendPlayerCommand("play-pause")}>
-                  {deferredPlayerState.isPlaying ? "Pause" : "Play"}
-                </button>
-                <button
-                  className="icon-button"
-                  disabled={!deferredPlayerState.canGoNext}
-                  onClick={() => void shellApi.sendPlayerCommand("next")}
-                >
-                  Next
-                </button>
-                <button className="icon-button" onClick={() => void shellApi.sendPlayerCommand("mute")}>
-                  {deferredPlayerState.isMuted ? "Unmute" : "Mute"}
-                </button>
               </div>
             ) : null}
 

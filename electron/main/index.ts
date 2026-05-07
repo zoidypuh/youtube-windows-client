@@ -1311,6 +1311,10 @@ function registerIpc() {
     mainWindow?.hide();
   });
 
+  ipcMain.handle("shell:show-window", () => {
+    revealWindow();
+  });
+
   ipcMain.handle("shell:set-video-bounds", (_event, bounds: VideoBounds | null) => {
     if (shellState.isVideoFullscreen) {
       return;
