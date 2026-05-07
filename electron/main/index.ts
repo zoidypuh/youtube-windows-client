@@ -614,13 +614,69 @@ function revealWindow() {
   if (!mainWindow) {
     return;
   }
+  if (mainWindow.isDestroyed()) {
+    return;
+  }
 
+  // Strategy 1: Restore if minimized
   if (mainWindow.isMinimized()) {
+    console.log('Window is minimized, restoring...');
     mainWindow.restore();
   }
 
-  mainWindow.show();
+  // Strategy 2: Show the window
+  if (!mainWindow.isVisible()) {
+    console.log('Window is not visible, showing...');
+    mainWindow.show();
+  }
+
+  // Strategy 3: Focus the window
+  console.log('Focusing window...');
   mainWindow.focus();
+
+  // Strategy 4: Additional foregrounding attempts for stubborn windows
+  try {
+    // Try to bring to front on Windows
+    if (process.platform === 'win32') {
+      // Flash frame to get attention
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.flashFrame(true);
+      }
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.flashFrame(false);
+        }
+      }, 500);
+
+      // Try setting always on top temporarily
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.setAlwaysOnTop(true, 'pop-up-menu');
+      }
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.setAlwaysOnTop(false);
+        }
+      }, 200);
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    console.log('Error during additional foregrounding:', errorMessage);
+  }
+
+  // Strategy 5: Ensure it's visible on all workspaces (Linux/macOS)
+  if (process.platform !== 'win32') {
+    try {
+      mainWindow.setVisibleOnAllWorkspaces(true);
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.setVisibleOnAllWorkspaces(false);
+        }
+      }, 200);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.log('Error setting visible on all workspaces:', errorMessage);
+    }
+  }
 }
 
 function toggleWindowVisibility() {
@@ -1095,9 +1151,7 @@ function createMainWindow() {
   });
 
   mainWindow.once("ready-to-show", () => {
-    if (isDev) {
-      revealWindow();
-    }
+    revealWindow();
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
