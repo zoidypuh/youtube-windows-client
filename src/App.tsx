@@ -221,7 +221,7 @@ export default function App() {
     </>
   );
   const transportControls = (
-    <div className="transport transport--search">
+    <>
       <button
         className="icon-button"
         type="button"
@@ -244,7 +244,7 @@ export default function App() {
       >
         {deferredPlayerState.isMuted ? "Unmute" : "Mute"}
       </button>
-    </div>
+    </>
   );
 
   const submitSearch = (event: FormEvent<HTMLFormElement>) => {
