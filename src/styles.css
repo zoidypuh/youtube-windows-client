@@ -97,6 +97,18 @@ input[type="range"] {
   gap: 16px;
 }
 
+.app--mini .topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+}
+
+.app--mini .window-actions {
+  justify-self: stretch;
+  width: 100%;
+  justify-content: center;
+}
+
 .topbar-copy {
   flex: 1 1 auto;
   min-width: 0;

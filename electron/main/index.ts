@@ -1014,9 +1014,17 @@ function applyWindowMode(mode: WindowMode) {
     return;
   }
 
-  const currentBounds = mainWindow.getBounds();
+  const currentBounds = mainWindow.isNormal() ? mainWindow.getBounds() : mainWindow.getNormalBounds();
   const nextPreset = windowPresets[mode];
   const nextBounds = getSavedBoundsForMode(mode, currentBounds);
+
+  if (mainWindow.isFullScreen()) {
+    mainWindow.setFullScreen(false);
+  }
+
+  if (mainWindow.isMaximized()) {
+    mainWindow.unmaximize();
+  }
 
   mainWindow.setMinimumSize(nextPreset.minWidth, nextPreset.minHeight);
   mainWindow.setResizable(true);
