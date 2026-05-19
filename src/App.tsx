@@ -195,31 +195,6 @@ export default function App() {
     deferredPlayerState.videoWidth > 0 && deferredPlayerState.videoHeight > 0
       ? `${deferredPlayerState.videoWidth} / ${deferredPlayerState.videoHeight}`
       : "16 / 9";
-  const footerContent = (
-    <>
-      <div className="status-line">
-        <span
-          className={`status-dot ${deferredPlayerState.isPlaying ? "status-dot--live" : ""}`}
-        />
-        <span>
-          {deferredPlayerState.isPlaying
-            ? "Playback active"
-            : deferredPlayerState.status === "loading"
-              ? "Player loading"
-              : "Playback paused"}
-        </span>
-      </div>
-      <div className="shortcut-list">
-        <span>{shellState.shortcuts.playPause} play/pause</span>
-        <span>{shellState.shortcuts.next} next</span>
-        <span>{shellState.shortcuts.volumeUp} volume up</span>
-        <span>{shellState.shortcuts.volumeDown} volume down</span>
-        <span>{shellState.shortcuts.mute} mute</span>
-        <span>{shellState.shortcuts.toggleMode} mode</span>
-        <span>{shellState.shortcuts.toggleWindow} show/hide</span>
-      </div>
-    </>
-  );
   const transportControls = (
     <>
       <button
@@ -278,6 +253,56 @@ export default function App() {
 
     void shellApi.openExternalUrl(url);
   };
+
+  const sourceActionControls = (
+    <>
+      <button
+        className="music-link-button music-link-button--spotify"
+        type="button"
+        disabled={!musicSearchQuery}
+        aria-label="Open current song in Spotify"
+        title="Open current song in Spotify"
+        onClick={() => openMusicSearch("spotify")}
+      >
+        Spotify
+      </button>
+      <button
+        className="music-link-button music-link-button--apple"
+        type="button"
+        disabled={!musicSearchQuery}
+        aria-label="Open current song in Apple Music"
+        title="Open current song in Apple Music"
+        onClick={() => openMusicSearch("apple-music")}
+      >
+        Apple
+      </button>
+      <button
+        className={`heart-button${deferredPlayerState.isLiked ? " heart-button--active" : ""}`}
+        type="button"
+        aria-label={deferredPlayerState.isLiked ? "Current video liked" : "Like current video"}
+        title={deferredPlayerState.isLiked ? "Current video liked" : "Like current video"}
+        onClick={likeCurrentVideo}
+      >
+        {deferredPlayerState.isLiked ? "♥" : "♡"}
+      </button>
+      <button className="ghost-button" type="button" onClick={() => void shellApi.openYoutubeHome()}>
+        Browse
+      </button>
+    </>
+  );
+
+  const searchActions =
+    shellState.mode === "mini" ? (
+      <>
+        <div className="search-action-row">{sourceActionControls}</div>
+        <div className="search-action-row search-action-row--transport">{transportControls}</div>
+      </>
+    ) : (
+      <>
+        {sourceActionControls}
+        {transportControls}
+      </>
+    );
 
   const handleShellWheel = (event: WheelEvent<HTMLDivElement>) => {
     if (shellState.mode !== "mini" || !shellRef.current) {
@@ -366,8 +391,6 @@ export default function App() {
             </section>
           ) : null}
 
-          {shellState.mode === "full" ? <section className="panel-footer panel-footer--video">{footerContent}</section> : null}
-
           <section ref={controlPanelRef} className="control-panel" onWheelCapture={handleControlPanelWheel}>
             <section className="search-panel">
               <form className="search-form" onSubmit={submitSearch}>
@@ -379,39 +402,7 @@ export default function App() {
                   onChange={(event) => setSearchQuery(event.target.value)}
                 />
                 <div className="search-actions">
-                  <button
-                    className="music-link-button music-link-button--spotify"
-                    type="button"
-                    disabled={!musicSearchQuery}
-                    aria-label="Open current song in Spotify"
-                    title="Open current song in Spotify"
-                    onClick={() => openMusicSearch("spotify")}
-                  >
-                    Spotify
-                  </button>
-                  <button
-                    className="music-link-button music-link-button--apple"
-                    type="button"
-                    disabled={!musicSearchQuery}
-                    aria-label="Open current song in Apple Music"
-                    title="Open current song in Apple Music"
-                    onClick={() => openMusicSearch("apple-music")}
-                  >
-                    Apple
-                  </button>
-                  <button
-                    className={`heart-button${deferredPlayerState.isLiked ? " heart-button--active" : ""}`}
-                    type="button"
-                    aria-label={deferredPlayerState.isLiked ? "Current video liked" : "Like current video"}
-                    title={deferredPlayerState.isLiked ? "Current video liked" : "Like current video"}
-                    onClick={likeCurrentVideo}
-                  >
-                    {deferredPlayerState.isLiked ? "♥" : "♡"}
-                  </button>
-                  <button className="ghost-button" type="button" onClick={() => void shellApi.openYoutubeHome()}>
-                    Browse
-                  </button>
-                  {transportControls}
+                  {searchActions}
                 </div>
               </form>
             </section>
@@ -481,8 +472,6 @@ export default function App() {
             </section>
           </section>
         </main>
-
-        {shellState.mode === "mini" ? <footer className="footer">{footerContent}</footer> : null}
       </div>
     </div>
   );
