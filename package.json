@@ -13,6 +13,7 @@
     "build": "npm run clean && npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.electron.json",
+    "watchdog:capture-window": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/capture-youtube-tray-window.ps1",
     "start": "electron dist-electron/main/index.js",
     "dist": "npm run build && electron-builder"
   },

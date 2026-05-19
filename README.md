@@ -108,6 +108,23 @@ wscript .\yt-music-client-hidden.vbs
 
 That wrapper hides the launcher window itself too. Use `.\yt-music-client.cmd` when you want to see install/build diagnostics.
 
+
+## Watchdog Visual Capture
+
+For deterministic visual QA on Windows, capture the actual `YouTube Tray` HWND instead of the primary desktop. The capture command restores a minimized or hidden matching window, moves it onto the primary working area, tries `PrintWindow`, and falls back to a screen copy from the restored bounds if the direct HWND capture is blank.
+
+```powershell
+npm run watchdog:capture-window
+```
+
+The default artifact is written to `artifacts\watchdog\youtube-tray-window.png`. To keep the current window position, pass `-NoMoveToPrimary` directly to the script:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\capture-youtube-tray-window.ps1 -NoMoveToPrimary
+```
+
+Use the default repositioning flow for watchdog runs where the app may be minimized, hidden to tray, or parked on another monitor. The saved image should include enough of the full player for Browse/search and playback controls.
+
 ## Packaging
 
 ```powershell
