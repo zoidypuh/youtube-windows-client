@@ -6,15 +6,6 @@ export const DEFAULT_SHELL_STATE: ShellState = {
   sizeLockByMode: {
     mini: false,
     full: false
-  },
-  shortcuts: {
-    playPause: "Ctrl+Alt+Space",
-    next: "Ctrl+Alt+Right",
-    volumeUp: "Ctrl+Alt+Up",
-    volumeDown: "Ctrl+Alt+Down",
-    mute: "Shift+Alt+M",
-    toggleMode: "Ctrl+Alt+Enter",
-    toggleWindow: "Ctrl+Alt+Y"
   }
 };
 

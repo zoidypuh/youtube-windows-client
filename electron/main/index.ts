@@ -94,15 +94,6 @@ type ShellState = {
   mode: WindowMode;
   isVideoFullscreen: boolean;
   sizeLockByMode: Record<WindowMode, boolean>;
-  shortcuts: {
-    playPause: string;
-    next: string;
-    volumeUp: string;
-    volumeDown: string;
-    mute: string;
-    toggleMode: string;
-    toggleWindow: string;
-  };
 };
 
 const isDev = !app.isPackaged;
@@ -123,15 +114,6 @@ const shellState: ShellState = {
   sizeLockByMode: {
     mini: false,
     full: false
-  },
-  shortcuts: {
-    playPause: "Ctrl+Alt+Space",
-    next: "Ctrl+Alt+Right",
-    volumeUp: "Ctrl+Alt+Up",
-    volumeDown: "Ctrl+Alt+Down",
-    mute: "Shift+Alt+M",
-    toggleMode: "Ctrl+Alt+Enter",
-    toggleWindow: "Ctrl+Alt+Y"
   }
 };
 
@@ -313,7 +295,10 @@ function normalizeStoredWindowBounds(mode: WindowMode, bounds: StoredWindowBound
 function getSavedBoundsForMode(mode: WindowMode, fallback?: Electron.Rectangle) {
   const preset = windowPresets[mode];
   const savedBounds = storedWindowBounds[mode];
-  const normalizedSavedBounds = savedBounds ? normalizeStoredWindowBounds(mode, savedBounds) : null;
+  const normalizedSavedBounds =
+    savedBounds && isStoredWindowBoundsUsableForMode(mode, savedBounds)
+      ? normalizeStoredWindowBounds(mode, savedBounds)
+      : null;
 
   return {
     x: normalizedSavedBounds?.x ?? fallback?.x,
@@ -321,6 +306,17 @@ function getSavedBoundsForMode(mode: WindowMode, fallback?: Electron.Rectangle) 
     width: normalizedSavedBounds?.width ?? preset.width,
     height: normalizedSavedBounds?.height ?? preset.height
   };
+}
+
+function isStoredWindowBoundsUsableForMode(mode: WindowMode, bounds: StoredWindowBounds) {
+  if (mode === "full") {
+    return true;
+  }
+
+  const fullPreset = windowPresets.full;
+  const normalizedBounds = normalizeStoredWindowBounds(mode, bounds);
+
+  return normalizedBounds.width < fullPreset.minWidth || normalizedBounds.height < fullPreset.minHeight;
 }
 
 function rememberCurrentWindowBounds() {

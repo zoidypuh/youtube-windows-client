@@ -46,15 +46,6 @@ export type ShellState = {
   mode: WindowMode;
   isVideoFullscreen: boolean;
   sizeLockByMode: Record<WindowMode, boolean>;
-  shortcuts: {
-    playPause: string;
-    next: string;
-    volumeUp: string;
-    volumeDown: string;
-    mute: string;
-    toggleMode: string;
-    toggleWindow: string;
-  };
 };
 
 export type ShellApi = {
