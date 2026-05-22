@@ -92,6 +92,7 @@ const PLAYER_ONLY_CLASS = "youtube-tray-player-only";
 const PLAYER_ONLY_STYLE_ID = "youtube-tray-player-only-style";
 const PREFERRED_VOLUME_KEY = "youtube-tray-preferred-volume";
 const PREFERRED_MUTED_KEY = "youtube-tray-preferred-muted";
+const AUDIO_OUTPUT_WARMUP_NUDGE = 0.01;
 const PLAYER_ONLY_STYLES = `
   html.${PLAYER_ONLY_CLASS},
   body.${PLAYER_ONLY_CLASS} {
@@ -224,6 +225,7 @@ let suppressPreferredVolumeCaptureUntil = 0;
 let preferredAudioReapplyTimeouts: number[] = [];
 let audioControlIntentUntil = 0;
 let activeMediaKey = "";
+let lastAudioOutputWarmupKey = "";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -323,6 +325,84 @@ function applyPreferredAudioState(video: HTMLVideoElement | null) {
   }
 }
 
+function getAudioOutputWarmupVolume(volume: number) {
+  if (volume >= 1 - AUDIO_OUTPUT_WARMUP_NUDGE) {
+    return clamp(volume - AUDIO_OUTPUT_WARMUP_NUDGE, 0, 1);
+  }
+
+  return clamp(volume + AUDIO_OUTPUT_WARMUP_NUDGE, 0, 1);
+}
+
+function warmAudioOutput(video: HTMLVideoElement, reason: string) {
+  if (
+    activeVideo !== video ||
+    video.paused ||
+    video.ended ||
+    video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+  ) {
+    return false;
+  }
+
+  const mediaKey = getMediaKey(video);
+
+  if (mediaKey && mediaKey === lastAudioOutputWarmupKey) {
+    return false;
+  }
+
+  const targetVolume = clamp(preferredVolume, 0, 1);
+  const targetMuted = preferredMuted;
+
+  if (targetVolume <= 0 && !targetMuted) {
+    return false;
+  }
+
+  const warmupVolume = getAudioOutputWarmupVolume(targetVolume);
+
+  if (Math.abs(warmupVolume - targetVolume) < 0.001) {
+    return false;
+  }
+
+  suppressPreferredVolumeCapture(1400);
+
+  try {
+    video.muted = targetMuted;
+    video.volume = targetVolume;
+    video.volume = warmupVolume;
+    lastAudioOutputWarmupKey = mediaKey;
+    console.info("[youtube-tray] audio-output-warmup", {
+      reason,
+      mediaKey,
+      targetMuted,
+      targetVolume: Math.round(targetVolume * 100),
+      warmupVolume: Math.round(warmupVolume * 100)
+    });
+
+    window.setTimeout(() => {
+      if (activeVideo !== video) {
+        return;
+      }
+
+      suppressPreferredVolumeCapture(900);
+      video.volume = targetVolume;
+      video.muted = targetMuted;
+      emitState();
+    }, 60);
+  } catch (error) {
+    console.warn("[youtube-tray] audio-output-warmup failed", error);
+    return false;
+  }
+
+  return true;
+}
+
+function scheduleAudioOutputWarmup(video: HTMLVideoElement, reason: string) {
+  for (const delay of [80, 260, 700]) {
+    window.setTimeout(() => {
+      warmAudioOutput(video, reason);
+    }, delay);
+  }
+}
+
 function getMediaKey(video: HTMLVideoElement | null) {
   if (!video) {
     return "";
@@ -362,6 +442,7 @@ function refreshMediaAudioState(video: HTMLVideoElement) {
   activeMediaKey = mediaKey;
   applyPreferredAudioState(video);
   schedulePreferredAudioReapply(video);
+  scheduleAudioOutputWarmup(video, "media-change");
 }
 
 function getVideoElement() {
@@ -754,6 +835,10 @@ function handleVideoEvent(event?: Event) {
 
   if (activeVideo) {
     refreshMediaAudioState(activeVideo);
+
+    if (event?.type === "play" || event?.type === "canplay" || event?.type === "loadedmetadata") {
+      scheduleAudioOutputWarmup(activeVideo, event.type);
+    }
   }
 
   if (activeVideo && event?.type === "volumechange") {
@@ -784,6 +869,7 @@ function handleVideoEvent(event?: Event) {
 
 function detachVideoEvents() {
   clearPreferredAudioReapplyTimeouts();
+  lastAudioOutputWarmupKey = "";
 
   if (!activeVideo) {
     return;
@@ -814,6 +900,7 @@ function attachVideoEvents() {
   activeMediaKey = getMediaKey(activeVideo);
   applyPreferredAudioState(activeVideo);
   schedulePreferredAudioReapply(activeVideo);
+  scheduleAudioOutputWarmup(activeVideo, "attach");
 
   for (const eventName of VIDEO_EVENTS) {
     activeVideo.addEventListener(eventName, handleVideoEvent);

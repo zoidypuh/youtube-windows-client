@@ -1274,6 +1274,17 @@ function createYoutubeView() {
     maybeSendStartupResume();
   });
 
+  youtubeView.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const levelLabel =
+      level === 0 ? "verbose" : level === 1 ? "info" : level === 2 ? "warning" : "error";
+    console[levelLabel === "error" ? "error" : "log"]("[youtube-view]", {
+      level: levelLabel,
+      message,
+      line,
+      sourceId
+    });
+  });
+
   youtubeView.webContents.on(
     "did-fail-load",
     (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
