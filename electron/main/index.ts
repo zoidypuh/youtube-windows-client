@@ -111,6 +111,7 @@ const youtubePreloadPath = path.join(__dirname, "..", "preload", "youtube.js");
 const youtubeHomeUrl = "https://www.youtube.com/";
 const youtubePartition = "persist:youtube-tray";
 const windowStatePath = path.join(app.getPath("userData"), "window-state.json");
+const audioGlitchMarkerPath = path.join(app.getPath("userData"), "audio-glitch-markers.jsonl");
 const bundledIconPath = app.isPackaged
   ? path.join(process.resourcesPath, "icon.png")
   : path.join(__dirname, "..", "..", "icon.png");
@@ -1026,6 +1027,57 @@ function sendPlayerControl(message: PlayerControlMessage) {
   youtubeView.webContents.send("youtube:player-control", message);
 }
 
+function appendAudioGlitchMarker(marker: Record<string, unknown>) {
+  try {
+    fs.mkdirSync(path.dirname(audioGlitchMarkerPath), { recursive: true });
+    fs.appendFileSync(audioGlitchMarkerPath, `${JSON.stringify(marker)}\n`);
+  } catch (error) {
+    console.warn("Failed to write audio glitch marker", error);
+  }
+}
+
+function markAudioGlitch(source: string) {
+  const markerId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const marker = {
+    at: new Date().toISOString(),
+    markerId,
+    phase: "main",
+    source,
+    playerState: {
+      status: playerState.status,
+      title: playerState.title,
+      artist: playerState.artist,
+      currentTime: playerState.currentTime,
+      duration: playerState.duration,
+      volume: playerState.volume,
+      isMuted: playerState.isMuted,
+      isPlaying: playerState.isPlaying,
+      hasVideo: playerState.hasVideo,
+      url: playerState.url
+    }
+  };
+
+  appendAudioGlitchMarker(marker);
+  console.log("[youtube-tray][audio-glitch-marker]", {
+    markerId,
+    source,
+    path: audioGlitchMarkerPath,
+    title: playerState.title,
+    currentTime: playerState.currentTime,
+    volume: playerState.volume,
+    isMuted: playerState.isMuted,
+    isPlaying: playerState.isPlaying
+  });
+
+  if (youtubeView && !youtubeView.webContents.isDestroyed()) {
+    youtubeView.webContents.send("youtube:mark-audio-glitch", {
+      markerId,
+      source,
+      at: marker.at
+    });
+  }
+}
+
 function updateTrayMenu() {
   if (!tray) {
     return;
@@ -1051,6 +1103,10 @@ function updateTrayMenu() {
       {
         label: "Next Recommendation",
         click: () => dispatchPlayerCommand("next")
+      },
+      {
+        label: "Mark Audio Glitch",
+        click: () => markAudioGlitch("tray")
       },
       {
         type: "separator"
@@ -1162,6 +1218,7 @@ function registerShortcuts() {
     ["CommandOrControl+Alt+Up", () => dispatchPlayerCommand("volume-up")],
     ["CommandOrControl+Alt+Down", () => dispatchPlayerCommand("volume-down")],
     ["Shift+Alt+M", () => dispatchPlayerCommand("mute")],
+    ["CommandOrControl+Alt+G", () => markAudioGlitch("shortcut")],
     ["CommandOrControl+Alt+Enter", () => toggleWindowMode()],
     ["CommandOrControl+Alt+Y", () => toggleWindowVisibility()]
   ];
@@ -1448,6 +1505,26 @@ function registerIpc() {
 
   ipcMain.handle("shell:show-window", () => {
     revealWindow();
+  });
+
+  ipcMain.handle("audio:mark-glitch", (_event, source: string = "ipc") => {
+    markAudioGlitch(source);
+  });
+
+  ipcMain.on("youtube:audio-glitch-marker", (event, marker: unknown) => {
+    if (event.sender.id !== youtubeView?.webContents.id) {
+      return;
+    }
+
+    if (!marker || typeof marker !== "object") {
+      return;
+    }
+
+    appendAudioGlitchMarker({
+      at: new Date().toISOString(),
+      phase: "youtube",
+      ...(marker as Record<string, unknown>)
+    });
   });
 
   ipcMain.handle("shell:set-video-bounds", (_event, bounds: VideoBounds | null) => {

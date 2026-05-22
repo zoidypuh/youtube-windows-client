@@ -288,6 +288,14 @@ export default function App() {
       <button className="ghost-button" type="button" onClick={() => void shellApi.openYoutubeHome()}>
         Browse
       </button>
+      <button
+        className="ghost-button"
+        type="button"
+        title="Mark an audio glitch in the diagnostic log"
+        onClick={() => void shellApi.markAudioGlitch()}
+      >
+        Mark glitch
+      </button>
     </>
   );
 

@@ -1204,6 +1204,27 @@ ipcRenderer.on("youtube:request-state", () => {
   emitState();
 });
 
+ipcRenderer.on(
+  "youtube:mark-audio-glitch",
+  (_event, marker: { markerId: string; source: string; at: string }) => {
+    const payload = {
+      markerId: marker.markerId,
+      source: marker.source,
+      requestedAt: marker.at,
+      performanceMs: Math.round(performance.now()),
+      ...getAudioProbeSnapshot()
+    };
+
+    console.info(
+      `[youtube-tray][audio-glitch-marker] ${JSON.stringify({
+        at: new Date().toISOString(),
+        ...payload
+      })}`
+    );
+    ipcRenderer.send("youtube:audio-glitch-marker", payload);
+  }
+);
+
 ipcRenderer.on("youtube:audio-probe-config", (_event, config: AudioProbeConfig) => {
   audioProbeConfig = {
     enabled: config.enabled === true,

@@ -38,6 +38,7 @@ const fallbackShellApi: ShellApi = {
   toggleVisibility: async () => undefined,
   hideWindow: async () => undefined,
   quit: async () => undefined,
+  markAudioGlitch: async () => undefined,
   sendPlayerCommand: async () => undefined,
   setPlayerVolume: async () => undefined,
   seekPlayer: async () => undefined,

@@ -56,6 +56,7 @@ export type ShellApi = {
   toggleVisibility: () => Promise<void>;
   hideWindow: () => Promise<void>;
   quit: () => Promise<void>;
+  markAudioGlitch: () => Promise<void>;
   sendPlayerCommand: (command: PlayerCommand) => Promise<void>;
   setPlayerVolume: (value: number) => Promise<void>;
   seekPlayer: (value: number) => Promise<void>;

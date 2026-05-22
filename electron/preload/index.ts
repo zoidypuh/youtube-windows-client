@@ -56,6 +56,7 @@ contextBridge.exposeInMainWorld("youtubeTray", {
   toggleVisibility: () => ipcRenderer.invoke("shell:toggle-visibility") as Promise<void>,
   hideWindow: () => ipcRenderer.invoke("shell:hide-window") as Promise<void>,
   quit: () => ipcRenderer.invoke("shell:quit") as Promise<void>,
+  markAudioGlitch: () => ipcRenderer.invoke("audio:mark-glitch", "ui") as Promise<void>,
   sendPlayerCommand: (command: PlayerCommand) =>
     ipcRenderer.invoke("player:command", command) as Promise<void>,
   setPlayerVolume: (value: number) =>
