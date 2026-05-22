@@ -90,6 +90,13 @@ type PlayerControlMessage =
       value: number;
     };
 
+type AudioProbeConfig = {
+  enabled: boolean;
+  sinkMatch: string;
+  volume: number;
+  logIntervalMs: number;
+};
+
 type ShellState = {
   mode: WindowMode;
   isVideoFullscreen: boolean;
@@ -107,6 +114,7 @@ const windowStatePath = path.join(app.getPath("userData"), "window-state.json");
 const bundledIconPath = app.isPackaged
   ? path.join(process.resourcesPath, "icon.png")
   : path.join(__dirname, "..", "..", "icon.png");
+const audioProbeConfig = getAudioProbeConfig();
 
 const shellState: ShellState = {
   mode: "mini",
@@ -177,6 +185,44 @@ let isApplyingWindowMode = false;
 let isClosingVideoFullscreenWindow = false;
 let mainWindowWasVisibleBeforeVideoFullscreen = true;
 let mainWindowBoundsBeforeVideoFullscreen: Electron.Rectangle | null = null;
+
+function getAudioProbeConfig(): AudioProbeConfig {
+  const enabled = process.env.YOUTUBE_TRAY_AUDIO_PROBE === "1";
+  const parsedVolume = Number(process.env.YOUTUBE_TRAY_AUDIO_PROBE_VOLUME ?? "0.5");
+  const parsedLogIntervalMs = Number(process.env.YOUTUBE_TRAY_AUDIO_PROBE_LOG_INTERVAL_MS ?? "250");
+
+  return {
+    enabled,
+    sinkMatch: process.env.YOUTUBE_TRAY_AUDIO_PROBE_SINK_MATCH || "CABLE Input",
+    volume: Number.isFinite(parsedVolume) ? Math.min(Math.max(parsedVolume, 0), 1) : 0.5,
+    logIntervalMs: Number.isFinite(parsedLogIntervalMs)
+      ? Math.min(Math.max(Math.round(parsedLogIntervalMs), 100), 5000)
+      : 250
+  };
+}
+
+function logAudioProbe(event: string, payload: Record<string, unknown> = {}) {
+  if (!audioProbeConfig.enabled) {
+    return;
+  }
+
+  console.log(
+    `[youtube-tray][audio-probe-main] ${JSON.stringify({
+      at: new Date().toISOString(),
+      event,
+      ...payload
+    })}`
+  );
+}
+
+function sendAudioProbeConfig() {
+  if (!audioProbeConfig.enabled || !youtubeView || youtubeView.webContents.isDestroyed()) {
+    return;
+  }
+
+  youtubeView.webContents.send("youtube:audio-probe-config", audioProbeConfig);
+  logAudioProbe("config-sent", audioProbeConfig);
+}
 
 function getCurrentPreset() {
   return windowPresets[shellState.mode];
@@ -916,6 +962,11 @@ function maybeSendStartupResume() {
     return;
   }
 
+  logAudioProbe("startup-resume-sent", {
+    url: pendingStartupResume.url,
+    currentTime: pendingStartupResume.currentTime,
+    shouldResumePlaying: pendingStartupResume.shouldResumePlaying
+  });
   youtubeView.webContents.send("youtube:resume-playback", pendingStartupResume);
 }
 
@@ -953,6 +1004,17 @@ function updatePlayerState(nextState: Partial<PlayerState>) {
   }
 
   sendPlayerState();
+  logAudioProbe("player-state", {
+    status: playerState.status,
+    title: playerState.title,
+    currentTime: playerState.currentTime,
+    duration: playerState.duration,
+    volume: playerState.volume,
+    isMuted: playerState.isMuted,
+    isPlaying: playerState.isPlaying,
+    hasVideo: playerState.hasVideo,
+    url: playerState.url
+  });
 }
 
 function sendPlayerControl(message: PlayerControlMessage) {
@@ -960,6 +1022,7 @@ function sendPlayerControl(message: PlayerControlMessage) {
     return;
   }
 
+  logAudioProbe("player-control", { message });
   youtubeView.webContents.send("youtube:player-control", message);
 }
 
@@ -1271,6 +1334,7 @@ function createYoutubeView() {
   });
 
   youtubeView.webContents.on("did-finish-load", () => {
+    sendAudioProbeConfig();
     maybeSendStartupResume();
   });
 
@@ -1317,6 +1381,7 @@ function createYoutubeView() {
     });
 
     youtubeView?.webContents.send("youtube:request-state");
+    sendAudioProbeConfig();
     maybeSendStartupResume();
   });
 
@@ -1332,6 +1397,7 @@ function createYoutubeView() {
     scheduleFullscreenRestore(60);
   });
 
+  logAudioProbe("enabled", audioProbeConfig);
   void youtubeView.webContents.loadURL(getInitialYoutubeUrl());
 }
 

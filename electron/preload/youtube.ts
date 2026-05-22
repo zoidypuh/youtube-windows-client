@@ -33,6 +33,13 @@ type ResumePlaybackMessage = {
   shouldResumePlaying: boolean;
 };
 
+type AudioProbeConfig = {
+  enabled: boolean;
+  sinkMatch: string;
+  volume: number;
+  logIntervalMs: number;
+};
+
 type PlayerState = {
   status: PlayerStatus;
   title: string;
@@ -226,9 +233,30 @@ let preferredAudioReapplyTimeouts: number[] = [];
 let audioControlIntentUntil = 0;
 let activeMediaKey = "";
 let lastAudioOutputWarmupKey = "";
+let audioProbeConfig: AudioProbeConfig | null = loadAudioProbeConfigFromEnv();
+let audioProbeSinkAppliedKey = "";
+let audioProbeLevelTimer: number | null = null;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
+}
+
+function loadAudioProbeConfigFromEnv(): AudioProbeConfig | null {
+  if (process.env.YOUTUBE_TRAY_AUDIO_PROBE !== "1") {
+    return null;
+  }
+
+  const parsedVolume = Number(process.env.YOUTUBE_TRAY_AUDIO_PROBE_VOLUME ?? "0.5");
+  const parsedLogIntervalMs = Number(process.env.YOUTUBE_TRAY_AUDIO_PROBE_LOG_INTERVAL_MS ?? "250");
+
+  return {
+    enabled: true,
+    sinkMatch: process.env.YOUTUBE_TRAY_AUDIO_PROBE_SINK_MATCH || "CABLE Input",
+    volume: Number.isFinite(parsedVolume) ? clamp(parsedVolume, 0, 1) : 0.5,
+    logIntervalMs: Number.isFinite(parsedLogIntervalMs)
+      ? clamp(Math.round(parsedLogIntervalMs), 100, 5000)
+      : 250
+  };
 }
 
 function sanitizeNumber(value: number) {
@@ -325,6 +353,130 @@ function applyPreferredAudioState(video: HTMLVideoElement | null) {
   }
 }
 
+function getAudioProbeSnapshot(video = activeVideo) {
+  return {
+    mediaKey: getMediaKey(video),
+    title: getTrackTitle(),
+    url: window.location.href,
+    currentTime: Math.round(sanitizeNumber(video?.currentTime ?? 0) * 1000) / 1000,
+    duration: Math.round(sanitizeNumber(video?.duration ?? 0) * 1000) / 1000,
+    readyState: video?.readyState ?? null,
+    paused: video?.paused ?? null,
+    ended: video?.ended ?? null,
+    volume: video ? Math.round(clamp(video.volume, 0, 1) * 1000) / 1000 : preferredVolume,
+    muted: video?.muted ?? preferredMuted,
+    sinkId:
+      video && "sinkId" in video && typeof video.sinkId === "string" ? video.sinkId : null
+  };
+}
+
+function logAudioProbe(event: string, payload: Record<string, unknown> = {}) {
+  if (!audioProbeConfig?.enabled) {
+    return;
+  }
+
+  console.info(
+    `[youtube-tray][audio-probe] ${JSON.stringify({
+      at: new Date().toISOString(),
+      performanceMs: Math.round(performance.now()),
+      event,
+      ...getAudioProbeSnapshot(),
+      ...payload
+    })}`
+  );
+}
+
+function applyAudioProbeVolume(video: HTMLVideoElement | null, reason: string) {
+  if (!audioProbeConfig?.enabled || !video) {
+    return;
+  }
+
+  const nextVolume = clamp(audioProbeConfig.volume, 0, 1);
+  preferredVolume = nextVolume;
+  preferredMuted = false;
+  suppressPreferredVolumeCapture(1800);
+  video.muted = false;
+  video.volume = nextVolume;
+  logAudioProbe("probe-volume-applied", { reason, targetVolume: nextVolume });
+}
+
+async function applyAudioProbeSink(video: HTMLVideoElement | null, reason: string) {
+  if (!audioProbeConfig?.enabled || !video) {
+    return;
+  }
+
+  const mediaKey = getMediaKey(video);
+
+  if (mediaKey && mediaKey === audioProbeSinkAppliedKey) {
+    return;
+  }
+
+  if (!("setSinkId" in video) || typeof video.setSinkId !== "function") {
+    logAudioProbe("probe-sink-unsupported", { reason });
+    return;
+  }
+
+  try {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      logAudioProbe("probe-sink-enumerate-unsupported", { reason });
+      return;
+    }
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const audioOutputs = devices.filter((device) => device.kind === "audiooutput");
+    const sinkMatch = audioProbeConfig.sinkMatch.toLowerCase();
+    const matchedDevice = audioOutputs.find((device) => device.label.toLowerCase().includes(sinkMatch));
+
+    logAudioProbe("probe-sink-devices", {
+      reason,
+      sinkMatch: audioProbeConfig.sinkMatch,
+      audioOutputs: audioOutputs.map((device) => ({
+        deviceId: device.deviceId,
+        label: device.label,
+        groupId: device.groupId
+      }))
+    });
+
+    if (!matchedDevice) {
+      logAudioProbe("probe-sink-missing", { reason, sinkMatch: audioProbeConfig.sinkMatch });
+      return;
+    }
+
+    await video.setSinkId(matchedDevice.deviceId);
+    audioProbeSinkAppliedKey = mediaKey;
+    logAudioProbe("probe-sink-applied", {
+      reason,
+      deviceId: matchedDevice.deviceId,
+      label: matchedDevice.label
+    });
+  } catch (error) {
+    logAudioProbe("probe-sink-failed", {
+      reason,
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+}
+
+function startAudioProbeLevelLog() {
+  if (!audioProbeConfig?.enabled || audioProbeLevelTimer !== null) {
+    return;
+  }
+
+  audioProbeLevelTimer = window.setInterval(() => {
+    logAudioProbe("probe-level");
+  }, audioProbeConfig.logIntervalMs);
+}
+
+function applyAudioProbe(video: HTMLVideoElement | null, reason: string) {
+  if (!audioProbeConfig?.enabled || !video) {
+    return;
+  }
+
+  applyAudioProbeVolume(video, reason);
+  void applyAudioProbeSink(video, reason);
+  startAudioProbeLevelLog();
+}
+
 function getAudioOutputWarmupVolume(volume: number) {
   if (volume >= 1 - AUDIO_OUTPUT_WARMUP_NUDGE) {
     return clamp(volume - AUDIO_OUTPUT_WARMUP_NUDGE, 0, 1);
@@ -369,9 +521,8 @@ function warmAudioOutput(video: HTMLVideoElement, reason: string) {
     video.volume = targetVolume;
     video.volume = warmupVolume;
     lastAudioOutputWarmupKey = mediaKey;
-    console.info("[youtube-tray] audio-output-warmup", {
+    logAudioProbe("audio-output-warmup", {
       reason,
-      mediaKey,
       targetMuted,
       targetVolume: Math.round(targetVolume * 100),
       warmupVolume: Math.round(warmupVolume * 100)
@@ -388,7 +539,10 @@ function warmAudioOutput(video: HTMLVideoElement, reason: string) {
       emitState();
     }, 60);
   } catch (error) {
-    console.warn("[youtube-tray] audio-output-warmup failed", error);
+    logAudioProbe("audio-output-warmup-failed", {
+      reason,
+      error: error instanceof Error ? error.message : String(error)
+    });
     return false;
   }
 
@@ -442,6 +596,7 @@ function refreshMediaAudioState(video: HTMLVideoElement) {
   activeMediaKey = mediaKey;
   applyPreferredAudioState(video);
   schedulePreferredAudioReapply(video);
+  applyAudioProbe(video, "media-change");
   scheduleAudioOutputWarmup(video, "media-change");
 }
 
@@ -834,6 +989,7 @@ function handleVideoEvent(event?: Event) {
   lastError = null;
 
   if (activeVideo) {
+    logAudioProbe("video-event", { type: event?.type ?? "poll" });
     refreshMediaAudioState(activeVideo);
 
     if (event?.type === "play" || event?.type === "canplay" || event?.type === "loadedmetadata") {
@@ -870,6 +1026,7 @@ function handleVideoEvent(event?: Event) {
 function detachVideoEvents() {
   clearPreferredAudioReapplyTimeouts();
   lastAudioOutputWarmupKey = "";
+  audioProbeSinkAppliedKey = "";
 
   if (!activeVideo) {
     return;
@@ -900,6 +1057,7 @@ function attachVideoEvents() {
   activeMediaKey = getMediaKey(activeVideo);
   applyPreferredAudioState(activeVideo);
   schedulePreferredAudioReapply(activeVideo);
+  applyAudioProbe(activeVideo, "attach");
   scheduleAudioOutputWarmup(activeVideo, "attach");
 
   for (const eventName of VIDEO_EVENTS) {
@@ -977,6 +1135,8 @@ function setVolume(value: number) {
     video.muted = false;
     video.volume = preferredVolume;
   }
+
+  logAudioProbe("app-volume-set", { targetVolume: preferredVolume });
 }
 
 function seekTo(value: number) {
@@ -1044,8 +1204,30 @@ ipcRenderer.on("youtube:request-state", () => {
   emitState();
 });
 
+ipcRenderer.on("youtube:audio-probe-config", (_event, config: AudioProbeConfig) => {
+  audioProbeConfig = {
+    enabled: config.enabled === true,
+    sinkMatch: String(config.sinkMatch || "CABLE Input"),
+    volume: clamp(Number(config.volume), 0, 1),
+    logIntervalMs: clamp(Math.round(Number(config.logIntervalMs) || 250), 100, 5000)
+  };
+
+  logAudioProbe("probe-config-received", {
+    sinkMatch: audioProbeConfig.sinkMatch,
+    volume: audioProbeConfig.volume,
+    logIntervalMs: audioProbeConfig.logIntervalMs
+  });
+  applyAudioProbe(activeVideo, "config");
+  emitState();
+});
+
 ipcRenderer.on("youtube:resume-playback", (_event, message: ResumePlaybackMessage) => {
   pendingResumePlayback = message;
+  logAudioProbe("resume-playback-received", {
+    url: message.url,
+    currentTime: message.currentTime,
+    shouldResumePlaying: message.shouldResumePlaying
+  });
   tryResumePlayback();
 });
 
@@ -1061,6 +1243,7 @@ ipcRenderer.on("youtube:force-layout", () => {
 window.addEventListener("DOMContentLoaded", () => {
   updateStatus("loading");
   syncPlayerOnlyLayout();
+  logAudioProbe("probe-config-from-env", audioProbeConfig ?? {});
   attachVideoEvents();
 
   document.addEventListener("pointerdown", (event) => {
