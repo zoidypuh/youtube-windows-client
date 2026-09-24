@@ -11,7 +11,12 @@ yarn-error.log*
 pnpm-debug.log*
 .codex
 AGENTS.md
-HANDOFF.md
+HANDOFF*.md
+artifacts/
+.cleanup-trash-*/
+docs/triage-notes/
+/cert.pem
+/key.pem
 .idea
 .vscode
 *.tsbuildinfo
