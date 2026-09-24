@@ -15,8 +15,6 @@ HANDOFF*.md
 artifacts/
 .cleanup-trash-*/
 docs/triage-notes/
-/cert.pem
-/key.pem
 .idea
 .vscode
 *.tsbuildinfo
